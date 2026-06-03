@@ -1,0 +1,247 @@
+/**
+ * `MolphaGateway` — isomorphic HTTP client with multi-endpoint failover.
+ *
+ * ⚠️ TODO(verify-against-gateway): the REST paths, request body shape, and the
+ * JSON response field names below are a best-effort contract derived from the
+ * spec. Reconcile with the running gateway before publish.
+ */
+import {
+  bytesToHex,
+  hexToBytes,
+} from "../core/encoding.js";
+import {
+  deriveGroupBitmap,
+  deriveSelectionSeed,
+  effectiveSelectionSize,
+  selectedIndices,
+} from "../core/selection.js";
+import type {
+  APIConfig,
+  DataUpdateResult,
+  JobConfig,
+  Node,
+  Signer,
+} from "../core/types.js";
+import { authMessage } from "./auth.js";
+import { encryptForNodes } from "./encryption.js";
+
+export interface ExecuteOptions {
+  jobId: string;
+  registryVersion: number;
+  apiConfig: APIConfig;
+  /** Omitted ⇒ all-zero authSig (dev only). */
+  signer?: Signer;
+  encrypt?: { secrets: Record<string, string> };
+  /** Max accepted value age in seconds. Default 60. */
+  maxAge?: number;
+  /** Each retry re-rolls the timestamp. Default 15. */
+  maxRetries?: number;
+  /** Per-request timeout in ms. Default 5000. */
+  timeoutMs?: number;
+}
+
+interface GatewayExecuteResponse {
+  status: "completed" | "pending" | string;
+  value?: string;
+  valuePacked?: string;
+  signersBitmap?: string;
+  s?: string;
+  commitmentAddr?: string;
+  signaturesRequired?: number;
+  fresh?: boolean;
+}
+
+const ZERO_AUTH_SIG = new Uint8Array(64);
+
+/** Thrown for terminal gateway errors (400/401) — never retried. */
+export class GatewayError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message);
+    this.name = "GatewayError";
+  }
+}
+
+export class MolphaGateway {
+  private readonly endpoints: string[];
+
+  constructor(endpoints: string | string[]) {
+    const list = Array.isArray(endpoints) ? endpoints : [endpoints];
+    if (list.length === 0) throw new Error("At least one endpoint is required");
+    this.endpoints = list.map((e) => e.replace(/\/$/, ""));
+  }
+
+  /** Tries endpoints in order; returns the first node list it can fetch. */
+  async getNodes(): Promise<Node[]> {
+    return this.firstReachable<Node[]>("/nodes");
+  }
+
+  async getJobConfig(jobId: string): Promise<JobConfig> {
+    return this.firstReachable<JobConfig>(`/jobs/${jobId}/config`);
+  }
+
+  async isHealthy(): Promise<boolean> {
+    for (const endpoint of this.endpoints) {
+      try {
+        const res = await fetch(`${endpoint}/health`, { method: "GET" });
+        if (res.ok) return true;
+      } catch {
+        // try next
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Run a gateway round with retry + failover. Per attempt a fresh timestamp
+   * yields a fresh selection bitmap; the body is POSTed to each endpoint in
+   * order until one `completed`s.
+   */
+  async execute(opts: ExecuteOptions): Promise<DataUpdateResult> {
+    const {
+      jobId,
+      registryVersion,
+      apiConfig,
+      signer,
+      encrypt,
+      maxAge = 60,
+      maxRetries = 15,
+      timeoutMs = 5000,
+    } = opts;
+
+    const jobIdBytes = hexToBytes(jobId);
+    const nodes = await this.getNodes();
+    const jobConfig = await this.getJobConfig(jobId);
+
+    let lastError: unknown;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      const timestamp = Math.floor(Date.now() / 1000);
+
+      const seed = deriveSelectionSeed(jobIdBytes, registryVersion, timestamp);
+      const groupSize = effectiveSelectionSize(
+        jobConfig.signaturesRequired,
+        jobConfig.redundancyBuffer,
+        nodes.length,
+      );
+      const bitmap = deriveGroupBitmap(seed, nodes.length, groupSize);
+      const indices = selectedIndices(bitmap, nodes.length);
+      const selected = nodes.filter((n) => indices.includes(n.index));
+
+      const authSig = signer
+        ? await signer(authMessage(jobIdBytes, timestamp))
+        : ZERO_AUTH_SIG;
+
+      const body: Record<string, unknown> = {
+        jobId,
+        registryVersion,
+        timestamp,
+        maxAge,
+        selectionBitmap: bytesToHex(bitmap),
+        selectedIndices: indices,
+        authSig: bytesToHex(authSig),
+        apiConfig,
+      };
+      if (encrypt) {
+        body.encrypted = encryptForNodes(apiConfig, encrypt.secrets, selected);
+      }
+
+      for (const endpoint of this.endpoints) {
+        try {
+          const res = await this.post(`${endpoint}/execute`, body, timeoutMs);
+          if (res.status === 400 || res.status === 401) {
+            throw new GatewayError(
+              `Gateway rejected request (${res.status})`,
+              res.status,
+            );
+          }
+          if (res.status === 503) {
+            lastError = new GatewayError("Gateway unavailable (503)", 503);
+            continue; // a different gateway may already hold the AggSig
+          }
+          if (!res.ok) {
+            lastError = new GatewayError(`Gateway error (${res.status})`, res.status);
+            continue;
+          }
+          const json = (await res.json()) as GatewayExecuteResponse;
+          if (json.status === "completed") {
+            return toResult(json, {
+              jobId,
+              registryVersion,
+              timestamp,
+              signaturesRequired: jobConfig.signaturesRequired,
+              bitmap,
+            });
+          }
+          lastError = new Error(`Gateway returned status: ${json.status}`);
+        } catch (err) {
+          if (err instanceof GatewayError && (err.status === 400 || err.status === 401)) {
+            throw err;
+          }
+          lastError = err; // timeout / network → next endpoint
+        }
+      }
+    }
+    throw lastError instanceof Error
+      ? lastError
+      : new Error("Gateway round failed after retries");
+  }
+
+  private async firstReachable<T>(path: string): Promise<T> {
+    let lastError: unknown;
+    for (const endpoint of this.endpoints) {
+      try {
+        const res = await fetch(`${endpoint}${path}`, { method: "GET" });
+        if (res.ok) return (await res.json()) as T;
+        lastError = new GatewayError(`GET ${path} failed (${res.status})`, res.status);
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error(`GET ${path} failed`);
+  }
+
+  private async post(
+    url: string,
+    body: unknown,
+    timeoutMs: number,
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+}
+
+function toResult(
+  json: GatewayExecuteResponse,
+  ctx: {
+    jobId: string;
+    registryVersion: number;
+    timestamp: number;
+    signaturesRequired: number;
+    bitmap: Uint8Array;
+  },
+): DataUpdateResult {
+  return {
+    jobId: ctx.jobId,
+    value: json.value ?? "",
+    valuePacked: json.valuePacked ?? "",
+    timestamp: ctx.timestamp,
+    registryVersion: ctx.registryVersion,
+    signaturesRequired: json.signaturesRequired ?? ctx.signaturesRequired,
+    signersBitmap: json.signersBitmap ?? bytesToHex(ctx.bitmap),
+    s: json.s ?? "",
+    commitmentAddr: json.commitmentAddr ?? "",
+    fresh: json.fresh ?? true,
+  };
+}
