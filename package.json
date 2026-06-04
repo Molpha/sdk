@@ -1,5 +1,5 @@
 {
-  "name": "@molpha_oracle/sdk",
+  "name": "@molpha-oracle/sdk",
   "version": "0.1.0",
   "description": "Molpha Consumer SDK — subscribe, create jobs, run gateway rounds, submit and read on-chain feeds.",
   "license": "MIT",
