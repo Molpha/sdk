@@ -1,0 +1,65 @@
+{
+  "name": "@molpha/sdk",
+  "version": "0.1.0",
+  "description": "Molpha Consumer SDK — subscribe, create jobs, run gateway rounds, submit and read on-chain feeds.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "idl"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./node": {
+      "import": "./dist/node.js",
+      "types": "./dist/node.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@noble/ciphers": "^1.2.1",
+    "@noble/curves": "^1.8.1",
+    "@noble/hashes": "^1.7.1"
+  },
+  "peerDependencies": {
+    "@coral-xyz/anchor": "^0.30.1",
+    "@solana/spl-token": "^0.4.9",
+    "@solana/web3.js": "^1.98.0"
+  },
+  "peerDependenciesMeta": {
+    "@coral-xyz/anchor": {
+      "optional": true
+    },
+    "@solana/spl-token": {
+      "optional": true
+    },
+    "@solana/web3.js": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@coral-xyz/anchor": "^0.30.1",
+    "@solana/spl-token": "^0.4.9",
+    "@solana/web3.js": "^1.98.0",
+    "tsup": "^8.3.6",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "packageManager": "pnpm@10.15.1+sha512.34e538c329b5553014ca8e8f4535997f96180a1d0f614339357449935350d924e22f8614682191264ec33d1462ac21561aff97f6bb18065351c162c7e8f6de67"
+}
