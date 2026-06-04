@@ -80,11 +80,10 @@ process.
 
 ## Status
 
-`0.1.0` — first iteration. Some signature-critical paths are implemented from the design spec
-and marked `TODO(verify-against-program)` in source (selection-bitmap derivation, the ECDH
-encryption envelope, the registry-version transition remap, and the verify-return decode). These
-must be reconciled against `molpha-solana-program` with shared cross-language test vectors before
-production use.
+`0.1.0` — first iteration. Signature-critical Solana client paths are now reconciled against the
+`molpha` on-chain program in this repo (selection-bitmap derivation, previous-version remap, and
+`verify_data_update` return-data decode). Gateway envelope encryption still requires
+gateway/node-side vector validation before production rollout.
 
 ## Develop
 

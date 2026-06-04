@@ -28,7 +28,7 @@ export const registryStatePda = (programId: PublicKey): PublicKey =>
 export const registryIndexPda = (index: number, programId: PublicKey): PublicKey =>
   pda([SEED_REGISTRY_INDEX, u32le(index)], programId);
 
-/** ⚠️ TODO(verify-against-program): plan seeds are not in the IDL; spec says `[planId]`. */
+/** Plan PDA is `[b"molpha_plan", [planType as u8]]` in `subscribe/create_job`. */
 export const planPda = (planId: number, programId: PublicKey): PublicKey =>
   pda([SEED_PLAN, Uint8Array.of(planId)], programId);
 

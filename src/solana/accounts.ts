@@ -1,16 +1,13 @@
 /**
  * Account fetching, registry-version transition resolution, remaining-accounts
  * construction, and verify-return decoding.
- *
- * ⚠️ TODO(verify-against-program): the previous-version transition remap and the
- * `verify_data_update` return layout are ported from the spec prose; reconcile
- * with `molpha-solana-program`.
  */
 import { type AccountMeta, PublicKey } from "@solana/web3.js";
 import { bytesToHex, hexToBytes } from "../core/encoding.js";
 import { selectedIndices } from "../core/selection.js";
 import type { DataUpdateResult } from "../core/types.js";
 import { registryIndexPda, VIRTUAL_INDEX } from "./pdas.js";
+const VERIFY_RETURN_LEN = 72;
 
 /** The subset of on-chain `RegistryState` the client needs (Anchor camelCase). */
 export interface RegistryStateView {
@@ -58,7 +55,16 @@ function mapIndexFn(
     return (bit) => bit; // current version: index == bit
   }
   if (registryVersion === registry.previousVersion) {
+    if ("add" in registry.lastTransitionType) {
+      return (bit) => bit;
+    }
+    const isRemoveTail = "removeTail" in registry.lastTransitionType;
     const isRemoveSwap = "removeSwap" in registry.lastTransitionType;
+    if (!isRemoveTail && !isRemoveSwap) {
+      throw new Error(
+        "InvalidTransitionAccount: previous-version verification requires remove-transition metadata",
+      );
+    }
     return (bit) => {
       if (bit === registry.removedOldIndex) return VIRTUAL_INDEX;
       if (isRemoveSwap && bit === registry.movedOldIndex) return registry.removedOldIndex;
@@ -72,16 +78,21 @@ function mapIndexFn(
 
 /**
  * Decode the `verify_data_update` simulation return data into the canonical
- * value + timestamp. ⚠️ TODO(verify-against-program): spec says 72 bytes but the
- * documented payload is value(32) + i64 BE (40 bytes); we read those leading
- * fields and ignore any trailing bytes.
+ * value + timestamp.
+ *
+ * Program layout is fixed 72 bytes:
+ * - `[0..32]` value (bytes32)
+ * - `[32..40]` canonical_timestamp (i64, big-endian)
+ * - `[40..72]` reserved / zeroed
  */
 export function decodeVerifyReturn(data: Uint8Array): {
   value: string;
   canonicalTimestamp: string;
 } {
-  if (data.length < 40) {
-    throw new Error(`verify return too short: ${data.length} bytes`);
+  if (data.length !== VERIFY_RETURN_LEN) {
+    throw new Error(
+      `verify return size mismatch: expected ${VERIFY_RETURN_LEN}, got ${data.length}`,
+    );
   }
   const value = bytesToHex(data.slice(0, 32));
   const view = new DataView(data.buffer, data.byteOffset + 32, 8);

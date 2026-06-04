@@ -1,9 +1,5 @@
 /**
  * `MolphaGateway` — isomorphic HTTP client with multi-endpoint failover.
- *
- * ⚠️ TODO(verify-against-gateway): the REST paths, request body shape, and the
- * JSON response field names below are a best-effort contract derived from the
- * spec. Reconcile with the running gateway before publish.
  */
 import {
   bytesToHex,
@@ -42,13 +38,25 @@ export interface ExecuteOptions {
 
 interface GatewayExecuteResponse {
   status: "completed" | "pending" | string;
+  data?: GatewayExecuteData;
+}
+
+interface GatewayExecuteData {
+  jobId?: string;
   value?: string;
   valuePacked?: string;
+  timestamp?: number;
+  registryVersion?: number;
+  signaturesRequired?: number;
   signersBitmap?: string;
   s?: string;
   commitmentAddr?: string;
-  signaturesRequired?: number;
   fresh?: boolean;
+}
+
+interface GatewayEnvelope<T> {
+  status: string;
+  data: T;
 }
 
 const ZERO_AUTH_SIG = new Uint8Array(64);
@@ -75,11 +83,12 @@ export class MolphaGateway {
 
   /** Tries endpoints in order; returns the first node list it can fetch. */
   async getNodes(): Promise<Node[]> {
-    return this.firstReachable<Node[]>("/nodes");
+    const data = await this.firstReachableData<{ nodes: Node[] } | Node[]>("/v1/nodes");
+    return Array.isArray(data) ? data : data.nodes;
   }
 
   async getJobConfig(jobId: string): Promise<JobConfig> {
-    return this.firstReachable<JobConfig>(`/jobs/${jobId}/config`);
+    return this.firstReachableData<JobConfig>(`/v1/jobs/${jobId}/config`);
   }
 
   async isHealthy(): Promise<boolean> {
@@ -112,8 +121,18 @@ export class MolphaGateway {
     } = opts;
 
     const jobIdBytes = hexToBytes(jobId);
-    const nodes = await this.getNodes();
-    const jobConfig = await this.getJobConfig(jobId);
+    const [nodes, jobConfig] = await Promise.all([
+      this.getNodes(),
+      this.getJobConfig(jobId),
+    ]);
+
+    const requestApiConfig: APIConfig = {
+      url: apiConfig.url,
+      method: apiConfig.method ?? "GET",
+      headers: apiConfig.headers ?? {},
+      responseParser: apiConfig.responseParser,
+      valueTransform: apiConfig.valueTransform ?? "multiply:1e6",
+    };
 
     let lastError: unknown;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -134,22 +153,23 @@ export class MolphaGateway {
         : ZERO_AUTH_SIG;
 
       const body: Record<string, unknown> = {
-        jobId,
         registryVersion,
         timestamp,
         maxAge,
-        selectionBitmap: bytesToHex(bitmap),
-        selectedIndices: indices,
         authSig: bytesToHex(authSig),
-        apiConfig,
+        apiConfig: requestApiConfig,
       };
       if (encrypt) {
-        body.encrypted = encryptForNodes(apiConfig, encrypt.secrets, selected);
+        body.encKeyBundle = encryptForNodes(requestApiConfig, encrypt.secrets, selected);
       }
 
       for (const endpoint of this.endpoints) {
         try {
-          const res = await this.post(`${endpoint}/execute`, body, timeoutMs);
+          const res = await this.post(
+            `${endpoint}/v1/jobs/${jobId}/execute`,
+            body,
+            timeoutMs,
+          );
           if (res.status === 400 || res.status === 401) {
             throw new GatewayError(
               `Gateway rejected request (${res.status})`,
@@ -165,8 +185,11 @@ export class MolphaGateway {
             continue;
           }
           const json = (await res.json()) as GatewayExecuteResponse;
-          if (json.status === "completed") {
-            return toResult(json, {
+          const payload = json.data ?? (
+            json.status === "completed" ? (json as unknown as GatewayExecuteData) : undefined
+          );
+          if (json.status === "completed" && payload) {
+            return toResult(payload, {
               jobId,
               registryVersion,
               timestamp,
@@ -188,12 +211,22 @@ export class MolphaGateway {
       : new Error("Gateway round failed after retries");
   }
 
-  private async firstReachable<T>(path: string): Promise<T> {
+  private async firstReachableData<T>(path: string): Promise<T> {
     let lastError: unknown;
     for (const endpoint of this.endpoints) {
       try {
         const res = await fetch(`${endpoint}${path}`, { method: "GET" });
-        if (res.ok) return (await res.json()) as T;
+        if (res.ok) {
+          const json = (await res.json()) as unknown;
+          if (json && typeof json === "object" && "data" in json) {
+            const wrapped = json as Partial<GatewayEnvelope<T>>;
+            if (wrapped.data === undefined) {
+              throw new GatewayError(`GET ${path} returned malformed payload`, res.status);
+            }
+            return wrapped.data;
+          }
+          return json as T;
+        }
         lastError = new GatewayError(`GET ${path} failed (${res.status})`, res.status);
       } catch (err) {
         lastError = err;
@@ -223,7 +256,7 @@ export class MolphaGateway {
 }
 
 function toResult(
-  json: GatewayExecuteResponse,
+  data: GatewayExecuteData,
   ctx: {
     jobId: string;
     registryVersion: number;
@@ -233,15 +266,15 @@ function toResult(
   },
 ): DataUpdateResult {
   return {
-    jobId: ctx.jobId,
-    value: json.value ?? "",
-    valuePacked: json.valuePacked ?? "",
-    timestamp: ctx.timestamp,
-    registryVersion: ctx.registryVersion,
-    signaturesRequired: json.signaturesRequired ?? ctx.signaturesRequired,
-    signersBitmap: json.signersBitmap ?? bytesToHex(ctx.bitmap),
-    s: json.s ?? "",
-    commitmentAddr: json.commitmentAddr ?? "",
-    fresh: json.fresh ?? true,
+    jobId: data.jobId ?? ctx.jobId,
+    value: data.value ?? "",
+    valuePacked: data.valuePacked ?? "",
+    timestamp: data.timestamp ?? ctx.timestamp,
+    registryVersion: data.registryVersion ?? ctx.registryVersion,
+    signaturesRequired: data.signaturesRequired ?? ctx.signaturesRequired,
+    signersBitmap: data.signersBitmap ?? bytesToHex(ctx.bitmap),
+    s: data.s ?? "",
+    commitmentAddr: data.commitmentAddr ?? "",
+    fresh: data.fresh ?? true,
   };
 }

@@ -68,8 +68,26 @@ describe("deriveGroupBitmap", () => {
     expect(deriveGroupBitmap(seed, 20, 8)).toEqual(deriveGroupBitmap(seed, 20, 8));
   });
 
-  it("returns all-zero for empty selection and full for groupSize >= nodeCount", () => {
+  it("returns all-zero for empty selection", () => {
     expect(selectedIndices(deriveGroupBitmap(seed, 10, 0), 10)).toEqual([]);
-    expect(selectedIndices(deriveGroupBitmap(seed, 5, 9), 5)).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it("throws when groupSize > nodeCount", () => {
+    expect(() => deriveGroupBitmap(seed, 5, 9)).toThrow(/GroupBitmapDerivationFailed/);
+  });
+
+  it("matches on-chain vector fixtures", () => {
+    const seed = new Uint8Array(32).fill(0x11);
+    const cases = [
+      [8, 3, "0000000000000000000000000000000000000000000000000000000000000038"],
+      [10, 7, "00000000000000000000000000000000000000000000000000000000000003d3"],
+      [16, 5, "0000000000000000000000000000000000000000000000000000000000002c30"],
+      [32, 20, "00000000000000000000000000000000000000000000000000000000d7ddb3a1"],
+    ] as const;
+
+    for (const [nodeCount, groupSize, expectedHex] of cases) {
+      const got = deriveGroupBitmap(seed, nodeCount, groupSize);
+      expect(Buffer.from(got).toString("hex")).toBe(expectedHex);
+    }
   });
 });

@@ -1,13 +1,6 @@
 /**
  * Node selection: deterministic, verifiable, without replacement.
  *
- * ⚠️ TODO(verify-against-program): `deriveGroupBitmap` is a faithful best-effort
- * port of the on-chain `derive_group_bitmap`. The program is the source of truth.
- * The exact per-candidate extraction (chunk width, round-counter encoding, modulo
- * vs. rejection) and the `effectiveSelectionSize` clamp MUST be byte-matched
- * against `molpha-solana-program` before publish — a mismatch makes every
- * signature fail `InvalidSelectionBitmap` on-chain.
- *
  * Canonical bitmap representation = 32-byte big-endian word (bit `i` lives in
  * byte `31 - (i >> 3)`, mask `1 << (i & 7)`), matching the wire / on-chain form.
  */
@@ -22,6 +15,7 @@ const MAX_ROUNDS = 65_536;
 
 const BITMAP_BYTES = 32;
 const MAX_NODES = BITMAP_BYTES * 8; // 256
+const U32_MAX = 0xffff_ffff;
 
 /**
  * `seed = keccak256(keccak256("MOLPHA_SELECTION_V1") || jobId || be32(rv) || be64(ts))`.
@@ -82,34 +76,41 @@ export function deriveGroupBitmap(
   nodeCount: number,
   groupSize: number,
 ): Uint8Array {
-  if (nodeCount < 0 || nodeCount > MAX_NODES) {
-    throw new RangeError(`nodeCount out of range: ${nodeCount}`);
+  if (!Number.isInteger(nodeCount) || nodeCount <= 0 || nodeCount > MAX_NODES) {
+    throw new RangeError(`GroupBitmapDerivationFailed: invalid nodeCount ${nodeCount}`);
   }
-  const size = Math.min(groupSize, nodeCount);
+  if (!Number.isInteger(groupSize) || groupSize < 0 || groupSize > nodeCount) {
+    throw new RangeError(`GroupBitmapDerivationFailed: invalid groupSize ${groupSize}`);
+  }
   const bitmap = new Uint8Array(BITMAP_BYTES);
-  if (size <= 0 || nodeCount === 0) return bitmap;
-  if (size === nodeCount) {
+  if (groupSize === 0) return bitmap;
+  if (groupSize === nodeCount) {
     for (let i = 0; i < nodeCount; i++) setBit(bitmap, i);
     return bitmap;
   }
 
   // Complement optimization: sample the smaller half, invert at the end.
-  const complement = size > nodeCount - size;
-  const sampleCount = complement ? nodeCount - size : size;
+  const complement = groupSize > nodeCount - groupSize;
+  const sampleCount = complement ? nodeCount - groupSize : groupSize;
+  const limit = Math.floor(U32_MAX / nodeCount) * nodeCount;
 
   const chosen = new Set<number>();
   let round = 0;
   while (chosen.size < sampleCount && round < MAX_ROUNDS) {
-    const block = keccak_256(concatBytes(SELECTION_DERIVE_DOMAIN, seed, u32be(round)));
+    const counterWord = new Uint8Array(32);
+    counterWord.set(u64be(round), 24);
+    const block = keccak_256(concatBytes(seed, SELECTION_DERIVE_DOMAIN, counterWord));
     for (let off = 0; off + 4 <= block.length && chosen.size < sampleCount; off += 4) {
-      const candidate =
+      const limb =
         ((block[off]! << 24) |
           (block[off + 1]! << 16) |
           (block[off + 2]! << 8) |
           block[off + 3]!) >>>
         0;
-      const idx = candidate % nodeCount;
-      chosen.add(idx);
+      if (limb < limit) {
+        const idx = limb % nodeCount;
+        chosen.add(idx);
+      }
     }
     round++;
   }

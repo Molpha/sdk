@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { DataUpdateResult } from "../src/core/types.js";
 import {
   bitmapToIndices,
+  decodeVerifyReturn,
   type RegistryStateView,
   resolveRemainingAccounts,
 } from "../src/solana/accounts.js";
@@ -74,10 +75,40 @@ describe("resolveRemainingAccounts", () => {
     expect(keys(metas)).toEqual([pda(0), pda(VIRTUAL_INDEX), pda(1)]);
   });
 
+  it("previous version + Add keeps identity mapping", () => {
+    const result = { ...baseResult, registryVersion: 4 };
+    const registry: RegistryStateView = {
+      ...baseRegistry,
+      lastTransitionType: { add: {} },
+      removedOldIndex: 1,
+      movedOldIndex: 2,
+    };
+    const metas = resolveRemainingAccounts(result, registry, programId);
+    expect(keys(metas)).toEqual([pda(0), pda(1), pda(2)]);
+  });
+
   it("rejects a version that is neither current nor previous", () => {
     const result = { ...baseResult, registryVersion: 2 };
     expect(() => resolveRemainingAccounts(result, baseRegistry, programId)).toThrow(
       /InvalidRegistryVersion/,
     );
+  });
+});
+
+describe("decodeVerifyReturn", () => {
+  it("decodes value + timestamp from the 72-byte return payload", () => {
+    const data = new Uint8Array(72);
+    data.set(new Uint8Array(32).fill(0xab), 0);
+    const ts = new DataView(data.buffer, 32, 8);
+    ts.setBigInt64(0, 1_700_000_123n, false);
+
+    expect(decodeVerifyReturn(data)).toEqual({
+      value: "ab".repeat(32),
+      canonicalTimestamp: "1700000123",
+    });
+  });
+
+  it("rejects non-72-byte payloads", () => {
+    expect(() => decodeVerifyReturn(new Uint8Array(40))).toThrow(/size mismatch/);
   });
 });
