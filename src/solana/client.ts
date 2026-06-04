@@ -1,0 +1,297 @@
+/**
+ * `MolphaSolanaClient` — consumer on-chain surface only (subscribe, extend,
+ * createJob, submitDataUpdate, readFeed, getRegistryVersion, verify). Built from
+ * an Anchor `Program` over the vendored IDL.
+ */
+import {
+  AnchorProvider,
+  BN,
+  Program,
+  type Idl,
+  type Wallet,
+} from "@coral-xyz/anchor";
+import { getAssociatedTokenAddressSync } from "@solana/spl-token";
+import {
+  type Commitment,
+  type Connection,
+  ComputeBudgetProgram,
+  PublicKey,
+  Transaction,
+} from "@solana/web3.js";
+import { bytesToHex, hexToBytes, toFixedBytes } from "../core/encoding.js";
+import { deriveJobId } from "../core/ids.js";
+import type { DataUpdateResult } from "../core/types.js";
+import {
+  type RegistryStateView,
+  decodeVerifyReturn,
+  resolveRemainingAccounts,
+} from "./accounts.js";
+import {
+  feedPda,
+  jobPda,
+  planPda,
+  protocolConfigPda,
+  registryStatePda,
+  subscriptionPda,
+} from "./pdas.js";
+
+const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+const SYSTEM_PROGRAM_ID = new PublicKey("11111111111111111111111111111111");
+const DEFAULT_COMPUTE_UNIT_LIMIT = 700_000;
+
+export type PlanId = 0 | 1 | 2 | 3;
+
+export interface SubscribeResult {
+  signature: string;
+}
+export interface CreateJobResult {
+  signature: string;
+  /** 32-byte job id, hex. */
+  jobId: string;
+}
+export interface SubmitResult {
+  signature: string;
+}
+
+export interface FeedAccount {
+  jobId: number[];
+  registryVersion: number;
+  canonicalTimestamp: BN;
+  value: number[];
+  signersBitmap: number[];
+  signaturesRequired: number;
+  lastUpdatedSlot: BN;
+  bump: number;
+}
+
+interface CreateClientOpts {
+  connection: Connection;
+  wallet: Wallet;
+  programId: PublicKey;
+  idl: Idl;
+  commitment?: Commitment;
+}
+
+const PLAN_VARIANTS = [
+  { basic: {} },
+  { standard: {} },
+  { professional: {} },
+  { enterprise: {} },
+] as const;
+
+export class MolphaSolanaClient {
+  private constructor(
+    private readonly program: Program,
+    private readonly provider: AnchorProvider,
+    readonly programId: PublicKey,
+  ) {}
+
+  static create(opts: CreateClientOpts): MolphaSolanaClient {
+    const provider = new AnchorProvider(opts.connection, opts.wallet, {
+      commitment: opts.commitment ?? "confirmed",
+    });
+    // Anchor 0.30 reads the program id from `idl.address`; override it so the
+    // caller-supplied programId always wins without mutating the vendored copy.
+    const idl: Idl = { ...opts.idl, address: opts.programId.toBase58() };
+    const program = new Program(idl, provider);
+    return new MolphaSolanaClient(program, provider, opts.programId);
+  }
+
+  private get wallet(): PublicKey {
+    return this.provider.wallet.publicKey;
+  }
+
+  /** Anchor's method/account namespaces are untyped without an IDL type param. */
+  private get methods(): any {
+    return this.program.methods;
+  }
+  private get accounts(): any {
+    return this.program.account;
+  }
+
+  async getRegistryVersion(): Promise<number> {
+    const registry = await this.fetchRegistry();
+    return registry.currentVersion;
+  }
+
+  async subscribe(planId: PlanId, opts?: { ownerUsdc?: PublicKey }): Promise<SubscribeResult> {
+    const owner = this.wallet;
+    const { usdcMint, treasury } = await this.fetchProtocolTokens();
+    const ownerUsdc = opts?.ownerUsdc ?? getAssociatedTokenAddressSync(usdcMint, owner);
+
+    const signature = await this.methods
+      .subscribe(PLAN_VARIANTS[planId])
+      .accounts({
+        owner,
+        protocolConfig: protocolConfigPda(this.programId),
+        plan: planPda(planId, this.programId),
+        subscription: subscriptionPda(owner, this.programId),
+        usdcMint,
+        ownerUsdc,
+        treasury,
+        systemProgram: SYSTEM_PROGRAM_ID,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .rpc();
+    return { signature };
+  }
+
+  async extendSubscription(opts?: { ownerUsdc?: PublicKey }): Promise<SubscribeResult> {
+    const owner = this.wallet;
+    const subscription = subscriptionPda(owner, this.programId);
+    const sub = await this.accounts.subscription.fetch(subscription);
+    const planId = planIdFromVariant(sub.planType);
+    const { usdcMint, treasury } = await this.fetchProtocolTokens();
+    const ownerUsdc = opts?.ownerUsdc ?? getAssociatedTokenAddressSync(usdcMint, owner);
+
+    const signature = await this.methods
+      .extendSubscription()
+      .accounts({
+        owner,
+        protocolConfig: protocolConfigPda(this.programId),
+        subscription,
+        plan: planPda(planId, this.programId),
+        usdcMint,
+        ownerUsdc,
+        treasury,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .rpc();
+    return { signature };
+  }
+
+  async createJob(
+    args: { apiConfigHash: Uint8Array; signaturesRequired: number; decimals: number },
+    owner: PublicKey = this.wallet,
+  ): Promise<CreateJobResult> {
+    const apiConfigHash = toFixedBytes(args.apiConfigHash, 32, "apiConfigHash");
+    const subscription = subscriptionPda(owner, this.programId);
+    const sub = await this.accounts.subscription.fetch(subscription);
+    const planId = planIdFromVariant(sub.planType);
+
+    const jobId = deriveJobId(owner.toBytes(), apiConfigHash);
+
+    const signature = await this.methods
+      .createJob(
+        {
+          apiConfigHash: Array.from(apiConfigHash),
+          signaturesRequired: args.signaturesRequired,
+          decimals: args.decimals,
+        },
+        Array.from(jobId),
+      )
+      .accounts({
+        owner,
+        protocolConfig: protocolConfigPda(this.programId),
+        plan: planPda(planId, this.programId),
+        job: jobPda(jobId, this.programId),
+        subscription,
+        feed: feedPda(jobId, this.programId),
+        systemProgram: SYSTEM_PROGRAM_ID,
+      })
+      .rpc();
+    return { signature, jobId: bytesToHex(jobId) };
+  }
+
+  async submitDataUpdate(
+    result: DataUpdateResult,
+    opts?: { computeUnitLimit?: number },
+  ): Promise<SubmitResult> {
+    const registry = await this.fetchRegistry();
+    const jobId = hexToBytes(result.jobId);
+    const remaining = resolveRemainingAccounts(result, registry, this.programId);
+    const cuIx = ComputeBudgetProgram.setComputeUnitLimit({
+      units: opts?.computeUnitLimit ?? DEFAULT_COMPUTE_UNIT_LIMIT,
+    });
+
+    const signature = await this.methods
+      .submitDataUpdate(this.buildSubmitArgs(result))
+      .accounts({
+        submitter: this.wallet,
+        registryState: registryStatePda(this.programId),
+        feed: feedPda(jobId, this.programId),
+      })
+      .remainingAccounts(remaining)
+      .preInstructions([cuIx])
+      .rpc();
+    return { signature };
+  }
+
+  async readFeed(jobId: string): Promise<FeedAccount | null> {
+    const feed = feedPda(hexToBytes(jobId), this.programId);
+    return (await this.accounts.feed.fetchNullable(feed)) as FeedAccount | null;
+  }
+
+  async verifyDataUpdate(
+    result: DataUpdateResult,
+  ): Promise<{ value: string; canonicalTimestamp: string }> {
+    const registry = await this.fetchRegistry();
+    const remaining = resolveRemainingAccounts(result, registry, this.programId);
+
+    const ix = await this.methods
+      .verifyDataUpdate(this.buildSubmitArgs(result))
+      .accounts({ registryState: registryStatePda(this.programId) })
+      .remainingAccounts(remaining)
+      .instruction();
+
+    const tx = new Transaction().add(ix);
+    tx.feePayer = this.wallet;
+    const { connection } = this.provider;
+    tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+
+    const sim = await connection.simulateTransaction(tx);
+    const ret = sim.value.returnData;
+    if (!ret) {
+      throw new Error(`verify_data_update returned no data: ${sim.value.err ?? "unknown"}`);
+    }
+    return decodeVerifyReturn(base64ToBytes(ret.data[0]));
+  }
+
+  private buildSubmitArgs(result: DataUpdateResult) {
+    return {
+      jobId: Array.from(hexToBytes(result.jobId)),
+      signaturesRequired: result.signaturesRequired,
+      registryVersion: result.registryVersion,
+      signersBitmap: Array.from(toFixedBytes(result.signersBitmap, 32, "signersBitmap")),
+      value: Array.from(toFixedBytes(result.valuePacked, 32, "valuePacked")),
+      canonicalTimestamp: new BN(result.timestamp),
+      aggSigS: Array.from(toFixedBytes(result.s, 32, "s")),
+      commitmentAddr: Array.from(toFixedBytes(result.commitmentAddr, 20, "commitmentAddr")),
+    };
+  }
+
+  private async fetchRegistry(): Promise<RegistryStateView> {
+    const registry = await this.accounts.registryState.fetch(
+      registryStatePda(this.programId),
+    );
+    return {
+      currentVersion: registry.currentVersion,
+      previousVersion: registry.previousVersion,
+      previousExpiresAt: BigInt(registry.previousExpiresAt.toString()),
+      lastTransitionType: registry.lastTransitionType,
+      removedOldIndex: registry.removedOldIndex,
+      movedOldIndex: registry.movedOldIndex,
+    };
+  }
+
+  private async fetchProtocolTokens(): Promise<{ usdcMint: PublicKey; treasury: PublicKey }> {
+    const config = await this.accounts.protocolConfig.fetch(
+      protocolConfigPda(this.programId),
+    );
+    return { usdcMint: config.usdcMint, treasury: config.treasury };
+  }
+}
+
+function planIdFromVariant(variant: Record<string, unknown>): PlanId {
+  const key = Object.keys(variant)[0]?.toLowerCase();
+  const idx = ["basic", "standard", "professional", "enterprise"].indexOf(key ?? "");
+  if (idx < 0) throw new Error(`Unknown plan variant: ${JSON.stringify(variant)}`);
+  return idx as PlanId;
+}
+
+function base64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
