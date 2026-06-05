@@ -39,8 +39,20 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Ensure a stable release exists
+        # npm assigns the FIRST published version to `latest` regardless of `--tag`.
+        # Guard against a dev snapshot becoming the package's `latest`: require an existing
+        # stable (non-prerelease) `latest`. If missing, cut a stable release from `main` first.
+        run: |
+          name=$(node -p "require('./package.json').name")
+          latest=$(npm view "$name" dist-tags.latest 2>/dev/null || true)
+          if [ -z "$latest" ] || printf '%s' "$latest" | grep -q '-'; then
+            echo "::error::No stable 'latest' release exists yet (found: '${latest:-none}'). Publish a stable release from 'main' before publishing dev snapshots, otherwise the snapshot becomes the package's 'latest' tag."
+            exit 1
+          fi
+
       - name: Publish dev snapshot
-        # Publishes a prerelease like 0.2.0-dev-20260605T120000 on the `dev` dist-tag.
+        # Publishes a prerelease like 0.2.0-dev-20260605120000 on the `dev` dist-tag.
         # Requires at least one pending changeset; if there are none, nothing is published.
         run: pnpm release:dev
         env:
