@@ -5,6 +5,7 @@ import {
   bytesToHex,
   hexToBytes,
 } from "../core/encoding.js";
+import { canonicalizeAPIConfig } from "../core/apiconfig.js";
 import {
   deriveGroupBitmap,
   deriveSelectionSeed,
@@ -23,7 +24,6 @@ import { encryptForNodes } from "./encryption.js";
 
 export interface ExecuteOptions {
   jobId: string;
-  registryVersion: number;
   apiConfig: APIConfig;
   /** Omitted ⇒ all-zero authSig (dev only). */
   signer?: Signer;
@@ -61,6 +61,9 @@ interface GatewayEnvelope<T> {
 
 const ZERO_AUTH_SIG = new Uint8Array(64);
 
+/** Default gateway base URL when `endpoints` is omitted. */
+export const DEFAULT_GATEWAY_ENDPOINT = "http://188.166.222.245:8080";
+
 /** Thrown for terminal gateway errors (400/401) — never retried. */
 export class GatewayError extends Error {
   constructor(
@@ -74,11 +77,25 @@ export class GatewayError extends Error {
 
 export class MolphaGateway {
   private readonly endpoints: string[];
+  private readonly getRegistryVersion: () => Promise<number>;
 
-  constructor(endpoints: string | string[]) {
-    const list = Array.isArray(endpoints) ? endpoints : [endpoints];
+  constructor(
+    endpoints?: string | string[],
+    getRegistryVersion: () => Promise<number> = async () => {
+      throw new Error(
+        "MolphaGateway requires getRegistryVersion to execute — pass the current on-chain version (e.g. () => solana.getRegistryVersion())",
+      );
+    },
+  ) {
+    const list =
+      endpoints === undefined
+        ? [DEFAULT_GATEWAY_ENDPOINT]
+        : Array.isArray(endpoints)
+          ? endpoints
+          : [endpoints];
     if (list.length === 0) throw new Error("At least one endpoint is required");
     this.endpoints = list.map((e) => e.replace(/\/$/, ""));
+    this.getRegistryVersion = getRegistryVersion;
   }
 
   /** Tries endpoints in order; returns the first node list it can fetch. */
@@ -111,7 +128,6 @@ export class MolphaGateway {
   async execute(opts: ExecuteOptions): Promise<DataUpdateResult> {
     const {
       jobId,
-      registryVersion,
       apiConfig,
       signer,
       encrypt,
@@ -120,19 +136,14 @@ export class MolphaGateway {
       timeoutMs = 5000,
     } = opts;
 
+    const registryVersion = await this.getRegistryVersion();
     const jobIdBytes = hexToBytes(jobId);
     const [nodes, jobConfig] = await Promise.all([
       this.getNodes(),
       this.getJobConfig(jobId),
     ]);
 
-    const requestApiConfig: APIConfig = {
-      url: apiConfig.url,
-      method: apiConfig.method ?? "GET",
-      headers: apiConfig.headers ?? {},
-      responseParser: apiConfig.responseParser,
-      valueTransform: apiConfig.valueTransform ?? "multiply:1e6",
-    };
+    const requestApiConfig = canonicalizeAPIConfig(apiConfig);
 
     let lastError: unknown;
     for (let attempt = 0; attempt < maxRetries; attempt++) {

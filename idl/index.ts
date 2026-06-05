@@ -4,10 +4,9 @@ import idlJson from "./molpha.json" with { type: "json" };
 /**
  * Vendored Molpha Anchor IDL (`target/idl/molpha.json` from the program repo).
  *
- * It is re-exported here as a convenience default so consumers can do
- * `MolphaSolanaClient.create({ idl: MOLPHA_IDL, ... })`. The client never
- * hard-imports it — pass any compatible IDL in via `create({ idl })`. Pin the
- * vendored copy to the deployed program version in your release process.
+ * Re-exported as `MOLPHA_IDL` and used as the default in `MolphaSDK` /
+ * `MolphaSolanaClient.create`. Pass `idl` / `programId` only when pinning a
+ * different deployment. Keep this copy aligned with the on-chain program you target.
  */
 export const MOLPHA_IDL = idlJson as Idl;
 
