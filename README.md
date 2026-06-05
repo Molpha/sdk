@@ -129,8 +129,12 @@ const sdk = new MolphaSDK({
   wallet: walletFromKeypairFile("~/.config/solana/id.json"),
 });
 
-// 1. Subscribe to a plan
-await sdk.solana.subscribe(PlanType.Basic);
+// 1. Subscribe to a plan — this debits USDC, so confirm the price first.
+const plan = await sdk.solana.getPlan(PlanType.Basic);
+// Show `plan.subscriptionPrice` (USDC base units) to the user, then confirm:
+const { pricePaid } = await sdk.solana.subscribe(PlanType.Basic, {
+  maxPriceUsdc: plan.subscriptionPrice, // most you agree to pay; aborts if the live price is higher
+});
 
 // 2. Create a job on-chain
 const apiConfig = {
@@ -152,7 +156,7 @@ const result = await sdk.gateway.execute({
 });
 
 // 4. Submit on-chain (or simulate first with verifyDataUpdate)
-const { signature } = await sdk.solana.submitDataUpdate(result, { computeUnitLimit: 700_000 });
+const { signature } = await sdk.solana.submitDataUpdate(result);
 // const { value, canonicalTimestamp } = await sdk.solana.verifyDataUpdate(result); // simulate-only
 
 const feed = await sdk.solana.readFeed(jobId);
