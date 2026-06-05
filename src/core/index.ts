@@ -3,6 +3,7 @@
  * truth for signature-critical bytes; must stay byte-identical with the Solana
  * program and EVM verifier.
  */
+export * from "./apiconfig.js";
 export * from "./encoding.js";
 export * from "./ids.js";
 export * from "./selection.js";

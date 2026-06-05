@@ -34,12 +34,14 @@ import {
   registryStatePda,
   subscriptionPda,
 } from "./pdas.js";
+import { MOLPHA_IDL, MOLPHA_PROGRAM_ADDRESS } from "../../idl/index.js";
+import { PlanType, planIdFromVariant, planVariant, type PlanId } from "./plans.js";
+
+export { PlanType, type PlanId } from "./plans.js";
 
 const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const SYSTEM_PROGRAM_ID = new PublicKey("11111111111111111111111111111111");
 const DEFAULT_COMPUTE_UNIT_LIMIT = 700_000;
-
-export type PlanId = 0 | 1 | 2 | 3;
 
 export interface SubscribeResult {
   signature: string;
@@ -67,17 +69,10 @@ export interface FeedAccount {
 interface CreateClientOpts {
   connection: Connection;
   wallet: Wallet;
-  programId: PublicKey;
-  idl: Idl;
+  programId?: PublicKey;
+  idl?: Idl;
   commitment?: Commitment;
 }
-
-const PLAN_VARIANTS = [
-  { basic: {} },
-  { standard: {} },
-  { professional: {} },
-  { enterprise: {} },
-] as const;
 
 export class MolphaSolanaClient {
   private constructor(
@@ -87,14 +82,15 @@ export class MolphaSolanaClient {
   ) {}
 
   static create(opts: CreateClientOpts): MolphaSolanaClient {
+    const programId = opts.programId ?? new PublicKey(MOLPHA_PROGRAM_ADDRESS);
     const provider = new AnchorProvider(opts.connection, opts.wallet, {
       commitment: opts.commitment ?? "confirmed",
     });
     // Anchor 0.30 reads the program id from `idl.address`; override it so the
     // caller-supplied programId always wins without mutating the vendored copy.
-    const idl: Idl = { ...opts.idl, address: opts.programId.toBase58() };
+    const idl: Idl = { ...(opts.idl ?? MOLPHA_IDL), address: programId.toBase58() };
     const program = new Program(idl, provider);
-    return new MolphaSolanaClient(program, provider, opts.programId);
+    return new MolphaSolanaClient(program, provider, programId);
   }
 
   private get wallet(): PublicKey {
@@ -114,13 +110,14 @@ export class MolphaSolanaClient {
     return registry.currentVersion;
   }
 
-  async subscribe(planId: PlanId, opts?: { ownerUsdc?: PublicKey }): Promise<SubscribeResult> {
+  async subscribe(plan: PlanType, opts?: { ownerUsdc?: PublicKey }): Promise<SubscribeResult> {
+    const planId = plan as PlanId;
     const owner = this.wallet;
     const { usdcMint, treasury } = await this.fetchProtocolTokens();
     const ownerUsdc = opts?.ownerUsdc ?? getAssociatedTokenAddressSync(usdcMint, owner);
 
     const signature = await this.methods
-      .subscribe(PLAN_VARIANTS[planId])
+      .subscribe(planVariant(planId))
       .accounts({
         owner,
         protocolConfig: protocolConfigPda(this.programId),
@@ -280,13 +277,6 @@ export class MolphaSolanaClient {
     );
     return { usdcMint: config.usdcMint, treasury: config.treasury };
   }
-}
-
-function planIdFromVariant(variant: Record<string, unknown>): PlanId {
-  const key = Object.keys(variant)[0]?.toLowerCase();
-  const idx = ["basic", "standard", "professional", "enterprise"].indexOf(key ?? "");
-  if (idx < 0) throw new Error(`Unknown plan variant: ${JSON.stringify(variant)}`);
-  return idx as PlanId;
 }
 
 function base64ToBytes(b64: string): Uint8Array {
