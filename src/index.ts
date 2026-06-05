@@ -6,26 +6,31 @@
  * directly (or import `MolphaGateway` / `MolphaSolanaClient` standalone).
  */
 import type { Commitment, Connection } from "@solana/web3.js";
-import type { PublicKey } from "@solana/web3.js";
-import type { Idl, Wallet } from "@coral-xyz/anchor";
+import { PublicKey } from "@solana/web3.js";
+import type { Idl } from "@coral-xyz/anchor";
 import { type ExecuteOptions, MolphaGateway } from "./gateway/index.js";
 import { MolphaSolanaClient } from "./solana/client.js";
 import type { DataUpdateResult, Signer } from "./core/types.js";
+import { MOLPHA_IDL, MOLPHA_PROGRAM_ADDRESS } from "../idl/index.js";
+import { gatewaySignerFromWallet, type MolphaWallet } from "./wallet.js";
 
 // Public re-exports.
 export * from "./core/index.js";
 export * from "./gateway/index.js";
 export * from "./solana/index.js";
 export { MOLPHA_IDL, MOLPHA_PROGRAM_ADDRESS } from "../idl/index.js";
+export { gatewaySignerFromWallet, signerFromKeypair, type MolphaWallet } from "./wallet.js";
 
 export interface MolphaSDKOptions {
-  endpoints: string | string[];
+  /** Defaults to `DEFAULT_GATEWAY_ENDPOINT`. Pass multiple URLs for failover. */
+  endpoints?: string | string[];
   connection: Connection;
-  wallet: Wallet;
-  programId: PublicKey;
-  idl: Idl;
-  /** Default authSig signer for gateway calls. */
-  signer?: Signer;
+  /** On-chain txs + gateway auth (see `MolphaWallet`). */
+  wallet: MolphaWallet;
+  /** Defaults to the vendored IDL's program address. */
+  programId?: PublicKey;
+  /** Defaults to `MOLPHA_IDL`. Override when pinning a different deployment. */
+  idl?: Idl;
   commitment?: Commitment;
 }
 
@@ -35,29 +40,30 @@ export class MolphaSDK {
   private readonly defaultSigner?: Signer;
 
   constructor(opts: MolphaSDKOptions) {
-    this.gateway = new MolphaGateway(opts.endpoints);
     this.solana = MolphaSolanaClient.create({
       connection: opts.connection,
       wallet: opts.wallet,
-      programId: opts.programId,
-      idl: opts.idl,
+      programId: opts.programId ?? new PublicKey(MOLPHA_PROGRAM_ADDRESS),
+      idl: opts.idl ?? MOLPHA_IDL,
       ...(opts.commitment ? { commitment: opts.commitment } : {}),
     });
-    if (opts.signer) this.defaultSigner = opts.signer;
+    this.gateway = new MolphaGateway(
+      opts.endpoints,
+      () => this.solana.getRegistryVersion(),
+    );
+    this.defaultSigner = gatewaySignerFromWallet(opts.wallet);
   }
 
   /**
-   * Resolve the current `registryVersion` from Solana, run the gateway round, and
-   * submit the signed result to the feed — one shared round definition.
+   * Run a gateway round against the current on-chain registry version and submit
+   * the signed result to the feed.
    */
   async executeAndSubmit(
     jobId: string,
-    opts: Omit<ExecuteOptions, "jobId" | "registryVersion">,
+    opts: Omit<ExecuteOptions, "jobId">,
   ): Promise<{ result: DataUpdateResult; signature: string }> {
-    const registryVersion = await this.solana.getRegistryVersion();
     const result = await this.gateway.execute({
       jobId,
-      registryVersion,
       ...(this.defaultSigner ? { signer: this.defaultSigner } : {}),
       ...opts,
     });

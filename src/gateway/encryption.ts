@@ -5,6 +5,7 @@ import { gcm } from "@noble/ciphers/aes";
 import { secp256k1 } from "@noble/curves/secp256k1";
 import { keccak_256 } from "@noble/hashes/sha3";
 import { randomBytes } from "@noble/hashes/utils";
+import { canonicalizeAPIConfig } from "../core/apiconfig.js";
 import { bytesToHex, concatBytes, hexToBytes, utf8 } from "../core/encoding.js";
 import type { APIConfig, EncKeyBundle, Node } from "../core/types.js";
 
@@ -52,15 +53,7 @@ export function encryptForNodes(
   if (selectedNodes.length === 0) throw new Error("No nodes to encrypt for");
 
   const resolved = resolveAPIConfig(apiConfig, secrets);
-  // Match gateway canonical payload shape before encryption.
-  const canonicalConfig: APIConfig = {
-    url: resolved.url,
-    method: resolved.method ?? "GET",
-    headers: resolved.headers ?? {},
-    responseParser: resolved.responseParser,
-    valueTransform: resolved.valueTransform ?? "multiply:1e6",
-  };
-  const plaintext = utf8(JSON.stringify(canonicalConfig));
+  const plaintext = utf8(JSON.stringify(canonicalizeAPIConfig(resolved)));
 
   const symKey = randomBytes(SYM_KEY_BYTES);
   const nonceSym = randomBytes(NONCE_BYTES);

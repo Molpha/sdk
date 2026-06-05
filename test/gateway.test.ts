@@ -48,10 +48,9 @@ describe("MolphaGateway.execute failover", () => {
       }),
     ) as unknown as typeof fetch;
 
-    const gw = new MolphaGateway("http://gw1");
+    const gw = new MolphaGateway("http://gw1", async () => 1);
     const result = await gw.execute({
       jobId: JOB_ID,
-      registryVersion: 1,
       apiConfig: { url: "http://api", responseParser: "$.price" },
     });
     expect(result.value).toBe("100");
@@ -62,11 +61,10 @@ describe("MolphaGateway.execute failover", () => {
     const handler = vi.fn(() => jsonResponse({ error: "bad" }, 400));
     globalThis.fetch = mockFetch(handler) as unknown as typeof fetch;
 
-    const gw = new MolphaGateway(["http://gw1", "http://gw2"]);
+    const gw = new MolphaGateway(["http://gw1", "http://gw2"], async () => 1);
     await expect(
       gw.execute({
         jobId: JOB_ID,
-        registryVersion: 1,
         maxRetries: 3,
         apiConfig: { url: "http://api", responseParser: "$.price" },
       }),
@@ -82,10 +80,9 @@ describe("MolphaGateway.execute failover", () => {
     );
     globalThis.fetch = mockFetch(handler) as unknown as typeof fetch;
 
-    const gw = new MolphaGateway(["http://gw1", "http://gw2"]);
+    const gw = new MolphaGateway(["http://gw1", "http://gw2"], async () => 1);
     const result = await gw.execute({
       jobId: JOB_ID,
-      registryVersion: 1,
       apiConfig: { url: "http://api", responseParser: "$.price" },
     });
     expect(result.value).toBe("7");
