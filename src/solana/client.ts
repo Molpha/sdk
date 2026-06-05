@@ -45,6 +45,18 @@ const DEFAULT_COMPUTE_UNIT_LIMIT = 700_000;
 
 export interface SubscribeResult {
   signature: string;
+  /** USDC base units actually debited from the owner for this subscription. */
+  pricePaid: bigint;
+}
+
+export interface PlanInfo {
+  planType: PlanType;
+  /** Subscription price in USDC base units (raw u64, e.g. 1_000_000 = 1 USDC at 6 decimals). */
+  subscriptionPrice: bigint;
+  maxJobs: number;
+  maxSigners: number;
+  privateApiEnabled: boolean;
+  isActive: boolean;
 }
 export interface CreateJobResult {
   signature: string;
@@ -110,11 +122,41 @@ export class MolphaSolanaClient {
     return registry.currentVersion;
   }
 
-  async subscribe(plan: PlanType, opts?: { ownerUsdc?: PublicKey }): Promise<SubscribeResult> {
+  /** Fetch a plan's on-chain terms, including the USDC `subscriptionPrice` charged on `subscribe`. */
+  async getPlan(plan: PlanType): Promise<PlanInfo> {
+    const planId = plan as PlanId;
+    const account = await this.accounts.plan.fetch(planPda(planId, this.programId));
+    return {
+      planType: planIdFromVariant(account.planType) as unknown as PlanType,
+      subscriptionPrice: BigInt(account.subscriptionPrice.toString()),
+      maxJobs: account.maxJobs,
+      maxSigners: account.maxSigners,
+      privateApiEnabled: account.privateApiEnabled,
+      isActive: account.isActive,
+    };
+  }
+
+  /**
+   * Subscribe to a plan. This **debits USDC** from the owner: the plan's
+   * `subscriptionPrice` is transferred to the protocol treasury on-chain.
+   *
+   * Payment is explicit and must be confirmed: pass `maxPriceUsdc` (USDC base
+   * units) as the most you agree to pay. The SDK reads the live on-chain price
+   * and aborts before sending the transaction if it exceeds that amount, so a
+   * price change between display and confirmation can never silently overcharge.
+   * The amount actually paid is returned as `pricePaid`.
+   *
+   * Use {@link getPlan} to display the current price to the user beforehand.
+   */
+  async subscribe(
+    plan: PlanType,
+    opts: { maxPriceUsdc: bigint | number | BN; ownerUsdc?: PublicKey },
+  ): Promise<SubscribeResult> {
     const planId = plan as PlanId;
     const owner = this.wallet;
     const { usdcMint, treasury } = await this.fetchProtocolTokens();
-    const ownerUsdc = opts?.ownerUsdc ?? getAssociatedTokenAddressSync(usdcMint, owner);
+    const price = await this.confirmPlanPrice(planId, opts.maxPriceUsdc, "subscribe");
+    const ownerUsdc = opts.ownerUsdc ?? getAssociatedTokenAddressSync(usdcMint, owner);
 
     const signature = await this.methods
       .subscribe(planVariant(planId))
@@ -130,16 +172,24 @@ export class MolphaSolanaClient {
         tokenProgram: TOKEN_PROGRAM_ID,
       })
       .rpc();
-    return { signature };
+    return { signature, pricePaid: price };
   }
 
-  async extendSubscription(opts?: { ownerUsdc?: PublicKey }): Promise<SubscribeResult> {
+  /**
+   * Extend the current subscription for another period. Like {@link subscribe}
+   * this **debits USDC** (the plan's `subscriptionPrice`) and requires explicit
+   * payment confirmation via `maxPriceUsdc`.
+   */
+  async extendSubscription(
+    opts: { maxPriceUsdc: bigint | number | BN; ownerUsdc?: PublicKey },
+  ): Promise<SubscribeResult> {
     const owner = this.wallet;
     const subscription = subscriptionPda(owner, this.programId);
     const sub = await this.accounts.subscription.fetch(subscription);
     const planId = planIdFromVariant(sub.planType);
     const { usdcMint, treasury } = await this.fetchProtocolTokens();
-    const ownerUsdc = opts?.ownerUsdc ?? getAssociatedTokenAddressSync(usdcMint, owner);
+    const price = await this.confirmPlanPrice(planId, opts.maxPriceUsdc, "extendSubscription");
+    const ownerUsdc = opts.ownerUsdc ?? getAssociatedTokenAddressSync(usdcMint, owner);
 
     const signature = await this.methods
       .extendSubscription()
@@ -154,7 +204,28 @@ export class MolphaSolanaClient {
         tokenProgram: TOKEN_PROGRAM_ID,
       })
       .rpc();
-    return { signature };
+    return { signature, pricePaid: price };
+  }
+
+  /**
+   * Read the live on-chain plan price and verify it does not exceed the amount
+   * the caller agreed to pay. Returns the price (USDC base units) on success.
+   */
+  private async confirmPlanPrice(
+    planId: PlanId,
+    maxPriceUsdc: bigint | number | BN,
+    method: string,
+  ): Promise<bigint> {
+    const max = toUsdcBaseUnits(maxPriceUsdc, "maxPriceUsdc");
+    const plan = await this.accounts.plan.fetch(planPda(planId, this.programId));
+    const price = BigInt(plan.subscriptionPrice.toString());
+    if (price > max) {
+      throw new Error(
+        `${method}: plan price ${price} USDC base units exceeds the confirmed maximum ${max}. ` +
+          "The on-chain price may have changed — re-confirm the current price before paying.",
+      );
+    }
+    return price;
   }
 
   async createJob(
@@ -277,6 +348,21 @@ export class MolphaSolanaClient {
     );
     return { usdcMint: config.usdcMint, treasury: config.treasury };
   }
+}
+
+/** Normalize a confirmed USDC amount (base units) to `bigint`, rejecting non-integers. */
+function toUsdcBaseUnits(amount: bigint | number | BN, label: string): bigint {
+  if (typeof amount === "bigint") {
+    if (amount < 0n) throw new Error(`${label} must be non-negative, got ${amount}`);
+    return amount;
+  }
+  if (typeof amount === "number") {
+    if (!Number.isInteger(amount) || amount < 0) {
+      throw new Error(`${label} must be a non-negative integer of USDC base units, got ${amount}`);
+    }
+    return BigInt(amount);
+  }
+  return BigInt(amount.toString());
 }
 
 function base64ToBytes(b64: string): Uint8Array {
