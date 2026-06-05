@@ -1,15 +1,16 @@
 /**
  * `MolphaSolanaClient` — consumer on-chain surface only (subscribe, extend,
- * createJob, submitDataUpdate, readFeed, getRegistryVersion, verify). Built from
+ * createJob, submitDataUpdate, readFeed/readPlan/readSubscription/readJob,
+ * getRegistryVersion, verify). Built from
  * an Anchor `Program` over the vendored IDL.
  */
 import {
   AnchorProvider,
-  BN,
   Program,
   type Idl,
   type Wallet,
 } from "@coral-xyz/anchor";
+import BN from "bn.js";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import {
   type Commitment,
@@ -58,6 +59,33 @@ export interface PlanInfo {
   privateApiEnabled: boolean;
   isActive: boolean;
 }
+
+export interface SubscriptionInfo {
+  owner: PublicKey;
+  planType: PlanType;
+  /** USDC base units prepaid on the subscription vault. */
+  prepaidUsdc: bigint;
+  /** Locked subscription price in USDC base units for the current period. */
+  price: bigint;
+  /** Unix timestamp (seconds) until which the subscription is valid. */
+  validUntil: bigint;
+  jobCount: number;
+}
+
+export interface JobInfo {
+  /** 32-byte job id, hex. */
+  jobId: string;
+  owner: PublicKey;
+  delegates: PublicKey[];
+  delegateCount: number;
+  /** 32-byte API config hash, hex. */
+  apiConfigHash: string;
+  decimals: number;
+  signaturesRequired: number;
+  /** Unix timestamp (seconds) when the job was created. */
+  createdAt: bigint;
+}
+
 export interface CreateJobResult {
   signature: string;
   /** 32-byte job id, hex. */
@@ -124,15 +152,54 @@ export class MolphaSolanaClient {
 
   /** Fetch a plan's on-chain terms, including the USDC `subscriptionPrice` charged on `subscribe`. */
   async getPlan(plan: PlanType): Promise<PlanInfo> {
-    const planId = plan as PlanId;
-    const account = await this.accounts.plan.fetch(planPda(planId, this.programId));
+    const info = await this.readPlan(plan);
+    if (!info) {
+      throw new Error(`plan account not found for ${PlanType[plan] ?? plan}`);
+    }
+    return info;
+  }
+
+  /** Read a plan account, or `null` if it has not been initialized. */
+  async readPlan(plan: PlanType): Promise<PlanInfo | null> {
+    const account = await this.accounts.plan.fetchNullable(planPda(plan as PlanId, this.programId));
+    return account ? this.decodePlan(account) : null;
+  }
+
+  /** Read an owner's subscription, or `null` if they have not subscribed. */
+  async readSubscription(owner: PublicKey = this.wallet): Promise<SubscriptionInfo | null> {
+    const account = await this.accounts.subscription.fetchNullable(
+      subscriptionPda(owner, this.programId),
+    );
+    if (!account) return null;
     return {
+      owner: account.owner,
       planType: planIdFromVariant(account.planType) as unknown as PlanType,
-      subscriptionPrice: BigInt(account.subscriptionPrice.toString()),
-      maxJobs: account.maxJobs,
-      maxSigners: account.maxSigners,
-      privateApiEnabled: account.privateApiEnabled,
-      isActive: account.isActive,
+      prepaidUsdc: BigInt(account.prepaidUsdc.toString()),
+      price: BigInt(account.price.toString()),
+      validUntil: BigInt(account.validUntil.toString()),
+      jobCount: account.jobCount,
+    };
+  }
+
+  /** Read a job account by id, or `null` if it does not exist. */
+  async readJob(jobId: string): Promise<JobInfo | null> {
+    const account = await this.accounts.job.fetchNullable(
+      jobPda(hexToBytes(jobId), this.programId),
+    );
+    if (!account) return null;
+    const delegates: PublicKey[] = [];
+    for (let i = 0; i < account.delegateCount; i++) {
+      delegates.push(account.delegates[i]);
+    }
+    return {
+      jobId: bytesToHex(Uint8Array.from(account.jobId)),
+      owner: account.owner,
+      delegates,
+      delegateCount: account.delegateCount,
+      apiConfigHash: bytesToHex(Uint8Array.from(account.apiConfigHash)),
+      decimals: account.decimals,
+      signaturesRequired: account.signaturesRequired,
+      createdAt: BigInt(account.createdAt.toString()),
     };
   }
 
@@ -325,6 +392,24 @@ export class MolphaSolanaClient {
       canonicalTimestamp: new BN(result.timestamp),
       aggSigS: Array.from(toFixedBytes(result.s, 32, "s")),
       commitmentAddr: Array.from(toFixedBytes(result.commitmentAddr, 20, "commitmentAddr")),
+    };
+  }
+
+  private decodePlan(account: {
+    planType: Record<string, unknown>;
+    subscriptionPrice: { toString(): string };
+    maxJobs: number;
+    maxSigners: number;
+    privateApiEnabled: boolean;
+    isActive: boolean;
+  }): PlanInfo {
+    return {
+      planType: planIdFromVariant(account.planType) as unknown as PlanType,
+      subscriptionPrice: BigInt(account.subscriptionPrice.toString()),
+      maxJobs: account.maxJobs,
+      maxSigners: account.maxSigners,
+      privateApiEnabled: account.privateApiEnabled,
+      isActive: account.isActive,
     };
   }
 
