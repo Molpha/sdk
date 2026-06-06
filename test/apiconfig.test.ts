@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { keccak_256 } from "@noble/hashes/sha3";
-import canonicalize from "canonicalize";
 import {
   canonicalizeAPIConfig,
   deriveApiConfigHash,
@@ -30,10 +29,15 @@ describe("deriveApiConfigHash", () => {
     responseParser: "$.price",
   };
 
-  it("is keccak256(JCS(canonical apiConfig))", () => {
-    const canonical = canonicalizeAPIConfig(minimal);
-    const jcs = canonicalize(canonical);
-    expect(deriveApiConfigHash(minimal)).toEqual(keccak_256(utf8(jcs!)));
+  it("is keccak256(JSON.stringify(canonical apiConfig))", () => {
+    const canonicalJson = JSON.stringify(canonicalizeAPIConfig(minimal));
+    expect(deriveApiConfigHash(minimal)).toEqual(keccak_256(utf8(canonicalJson)));
+  });
+
+  it("matches node test vector", () => {
+    expect(bytesToHex(deriveApiConfigHash(minimal))).toBe(
+      "49919e2078d1021a3a792993bdd3a332a1fa0d6c548a327ac7bc8e3c2b61002a",
+    );
   });
 
   it("matches explicit defaults", () => {
