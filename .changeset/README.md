@@ -17,8 +17,9 @@ Pick the bump type based on the **nature of the change**, not the branch:
 - **minor** — new backward-compatible feature
 - **major** — breaking change
 
-> Note: while the package is in `0.x`, changesets treats breaking changes as a minor bump
-> (`0.1.0 → 0.2.0`) and features/fixes as patch. This is intentional pre-`1.0.0`.
+> Note: changesets applies the bump **literally** — a `major` changeset on `0.x` goes straight to
+> `1.0.0` (it does not clamp to `0.x`). While the package is pre-`1.0.0`, choose `minor` for breaking
+> changes and `patch` for features/fixes, and only pick `major` when you intend to release `1.0.0`.
 
 Commit the generated `.changeset/*.md` file along with your code. Releases are produced
 automatically once the change lands on `main` (see `.github/workflows/release.yml`).

@@ -203,8 +203,10 @@ branch it merges from.
    pnpm changeset
    ```
 
-   Choose `patch` (fix), `minor` (feature), or `major` (breaking). While the package is `0.x`,
-   changesets maps breaking → minor and feature/fix → patch.
+   Choose `patch` (fix), `minor` (feature), or `major` (breaking). Note: changesets applies the
+   bump literally — a `major` changeset on `0.x` jumps straight to `1.0.0`. While the package is
+   pre-`1.0.0`, pick `minor` for breaking changes and `patch` for features/fixes, and only select
+   `major` when you intend to cut `1.0.0`.
 
 2. **Stable releases (`main`):** when changes land on `main`, the `Release` workflow opens a
    "release" PR that bumps `package.json` and updates `CHANGELOG.md`. Merging that PR publishes
@@ -223,6 +225,16 @@ branch it merges from.
 
 ### One-time setup
 
-Add an automation `NPM_TOKEN` (a granular/automation npm token with publish access to the
-`@molpha-oracle` scope) under **Settings → Secrets and variables → Actions** in the GitHub repo.
-The built-in `GITHUB_TOKEN` handles opening the release PR.
+1. Add an automation `NPM_TOKEN` (a granular/automation npm token with publish access to the
+   `@molpha-oracle` scope) under **Settings → Secrets and variables → Actions** in the GitHub repo.
+   The built-in `GITHUB_TOKEN` handles opening the release PR.
+2. **Publish a stable release from `main` first.** npm assigns the first published version to the
+   `latest` tag no matter the `--tag`, so if a `dev` snapshot is published before any stable release,
+   that prerelease becomes `latest`. The `dev` workflow guards against this and will fail until a
+   stable `latest` exists.
+
+If `latest` ever ends up on a prerelease, repoint it after a stable version is published:
+
+```bash
+npm dist-tag add @molpha-oracle/sdk@<stable-version> latest
+```
