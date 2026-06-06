@@ -13,5 +13,5 @@ export default defineConfig({
   splitting: true,
   target: "es2022",
   // Solana surface is an optional peer dependency; never bundle it.
-  external: ["@coral-xyz/anchor", "@solana/web3.js", "@solana/spl-token"],
+  external: ["@coral-xyz/anchor", "@solana/web3.js", "@solana/spl-token", "bn.js"],
 });
