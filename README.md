@@ -14,7 +14,7 @@ pnpm add @solana/web3.js @coral-xyz/anchor @solana/spl-token
 
 | Import | Use |
 |---|---|
-| `@molpha-oracle/sdk` | Facade (`MolphaSDK`), `MolphaGateway`, `MolphaSolanaClient`, `core`. Browser-safe (no `fs` in the main entry). |
+| `@molpha-oracle/sdk` | Facade (`MolphaSDK`), `MolphaGateway`, `MolphaSolanaClient`, `core`, EVM helpers. Browser-safe (no `fs` in the main entry). |
 | `@molpha-oracle/sdk/utils` | `walletFromKeypairFile` — load a Solana CLI keypair as an Anchor `Wallet` (Node.js only). |
 
 `"sideEffects": false` and ESM let gateway-only or read-only apps tree-shake the Anchor-heavy
@@ -167,6 +167,72 @@ Steps 3–4 in one call: `sdk.executeAndSubmit(jobId, { apiConfig, ... })` (see 
 `MolphaSolanaClient.create({ connection, wallet })` and
 `new MolphaGateway(endpoints?, () => solana.getRegistryVersion())` share the same defaults as
 `MolphaSDK` (the facade wires the registry version resolver for you).
+
+## EVM helpers
+
+After a gateway round, convert `DataUpdateResult` into verifier contract arguments and call
+`verify` on a deployed Molpha verifier. The SDK ships deployed testnet addresses and
+framework-agnostic tuple builders — no ethers/viem runtime dependency in the package itself.
+
+### Deployed verifier addresses
+
+```ts
+import {
+  MOLPHA_VERIFIER_ADDRESSES,
+  MOLPHA_VERIFIER_EVM_SEPOLIA,
+  getMolphaVerifierAddress,
+} from "@molpha-oracle/sdk";
+
+const address = getMolphaVerifierAddress("evm-sepolia");
+// or: MOLPHA_VERIFIER_ADDRESSES["arbitrum-sepolia"]
+// or: MOLPHA_VERIFIER_EVM_SEPOLIA
+```
+
+| Network | Constant |
+|---|---|
+| Ethereum Sepolia | `MOLPHA_VERIFIER_EVM_SEPOLIA` |
+| Arbitrum Sepolia | `MOLPHA_VERIFIER_ARBITRUM_SEPOLIA` |
+| Avalanche Fuji | `MOLPHA_VERIFIER_AVALANCHE_FUJI` |
+| BSC testnet | `MOLPHA_VERIFIER_BSC_TESTNET` |
+
+### Build verifier args
+
+```ts
+import { buildEvmVerifierArgs } from "@molpha-oracle/sdk";
+
+const result = await sdk.gateway.execute({ jobId, apiConfig });
+const { dataUpdate, signature } = buildEvmVerifierArgs(result);
+// dataUpdate: [bytes32 jobId, uint32 registryVersion, uint32 signaturesRequired, bytes32 valuePacked, uint64 timestamp]
+// signature:  [bytes32 s, address commitment, uint256 signersBitmap]
+```
+
+### Call with ethers or viem
+
+```ts
+import { Contract } from "ethers";
+import { buildEvmVerifierArgs, getMolphaVerifierAddress } from "@molpha-oracle/sdk";
+
+const verifier = new Contract(getMolphaVerifierAddress("evm-sepolia"), abi, signer);
+const { dataUpdate, signature } = buildEvmVerifierArgs(result);
+await verifier.verify(dataUpdate, signature);
+```
+
+```ts
+import { createPublicClient, http } from "viem";
+import { buildEvmVerifierArgs, MOLPHA_VERIFIER_EVM_SEPOLIA } from "@molpha-oracle/sdk";
+
+const client = createPublicClient({ chain, transport: http() });
+const { dataUpdate, signature } = buildEvmVerifierArgs(result);
+await client.readContract({
+  address: MOLPHA_VERIFIER_EVM_SEPOLIA,
+  abi,
+  functionName: "verify",
+  args: [dataUpdate, signature],
+});
+```
+
+Lower-level helpers (`toFixedHex`, `signersBitmapToUint256`, `signersBitmapToDecimal`) are also
+exported when you need to assemble arguments manually.
 
 ## IDL vendoring
 

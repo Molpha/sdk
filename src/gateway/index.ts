@@ -60,6 +60,9 @@ interface GatewayEnvelope<T> {
 }
 
 const ZERO_AUTH_SIG = new Uint8Array(64);
+const JOB_CONFIG_RETRY_ATTEMPTS = 10;
+const JOB_CONFIG_RETRY_INITIAL_DELAY_MS = 250;
+const JOB_CONFIG_RETRY_MAX_DELAY_MS = 2000;
 
 /** Default gateway base URL when `endpoints` is omitted. */
 export const DEFAULT_GATEWAY_ENDPOINT = "http://188.166.222.245:8080";
@@ -140,7 +143,7 @@ export class MolphaGateway {
     const jobIdBytes = hexToBytes(jobId);
     const [nodes, jobConfig] = await Promise.all([
       this.getNodes(),
-      this.getJobConfig(jobId),
+      this.getJobConfigWithRetry(jobId),
     ]);
 
     const requestApiConfig = canonicalizeAPIConfig(apiConfig);
@@ -181,18 +184,25 @@ export class MolphaGateway {
             body,
             timeoutMs,
           );
+          const errorDetail = !res.ok ? await parseGatewayErrorDetail(res) : undefined;
           if (res.status === 400 || res.status === 401) {
             throw new GatewayError(
-              `Gateway rejected request (${res.status})`,
+              formatGatewayErrorMessage("Gateway rejected request", res.status, errorDetail),
               res.status,
             );
           }
           if (res.status === 503) {
-            lastError = new GatewayError("Gateway unavailable (503)", 503);
+            lastError = new GatewayError(
+              formatGatewayErrorMessage("Gateway unavailable", 503, errorDetail),
+              503,
+            );
             continue; // a different gateway may already hold the AggSig
           }
           if (!res.ok) {
-            lastError = new GatewayError(`Gateway error (${res.status})`, res.status);
+            lastError = new GatewayError(
+              formatGatewayErrorMessage("Gateway error", res.status, errorDetail),
+              res.status,
+            );
             continue;
           }
           const json = (await res.json()) as GatewayExecuteResponse;
@@ -246,6 +256,34 @@ export class MolphaGateway {
     throw lastError instanceof Error ? lastError : new Error(`GET ${path} failed`);
   }
 
+  private async getJobConfigWithRetry(jobId: string): Promise<JobConfig> {
+    let lastError: unknown;
+    let delayMs = JOB_CONFIG_RETRY_INITIAL_DELAY_MS;
+
+    for (let attempt = 0; attempt < JOB_CONFIG_RETRY_ATTEMPTS; attempt++) {
+      try {
+        return await this.getJobConfig(jobId);
+      } catch (err) {
+        if (!(err instanceof GatewayError && err.status === 404)) {
+          throw err;
+        }
+        lastError = err;
+      }
+
+      if (attempt < JOB_CONFIG_RETRY_ATTEMPTS - 1) {
+        await sleep(delayMs);
+        delayMs = Math.min(
+          Math.floor(delayMs * 1.5),
+          JOB_CONFIG_RETRY_MAX_DELAY_MS,
+        );
+      }
+    }
+
+    throw lastError instanceof Error
+      ? lastError
+      : new GatewayError(`GET /v1/jobs/${jobId}/config failed`, 404);
+  }
+
   private async post(
     url: string,
     body: unknown,
@@ -263,6 +301,39 @@ export class MolphaGateway {
     } finally {
       clearTimeout(timer);
     }
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function formatGatewayErrorMessage(
+  prefix: string,
+  status: number,
+  detail?: string,
+): string {
+  if (!detail) return `${prefix} (${status})`;
+  return `${prefix} (${status}): ${detail}`;
+}
+
+async function parseGatewayErrorDetail(res: Response): Promise<string | undefined> {
+  try {
+    const text = (await res.text()).trim();
+    if (!text) return undefined;
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      if (parsed && typeof parsed === "object") {
+        const record = parsed as Record<string, unknown>;
+        const message = record.error ?? record.message ?? record.detail;
+        if (typeof message === "string" && message.trim()) return message.trim();
+      }
+    } catch {
+      // fall back to raw body below
+    }
+    return text;
+  } catch {
+    return undefined;
   }
 }
 

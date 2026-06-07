@@ -13,7 +13,7 @@ export function canonicalizeAPIConfig(apiConfig: APIConfig): APIConfig {
     method: apiConfig.method ?? "GET",
     headers: apiConfig.headers ?? {},
     responseParser: apiConfig.responseParser,
-    valueTransform: apiConfig.valueTransform ?? "multiply:1e6",
+    valueTransform: apiConfig.valueTransform ?? "",
   };
 }
 
