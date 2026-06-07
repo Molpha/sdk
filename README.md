@@ -1,24 +1,60 @@
 # @molpha-oracle/sdk
 
-Browser-first TypeScript SDK for **Molpha data consumers / job owners**: subscribe, create a job,
-run a gateway round, submit the signed result on-chain, and read it back. Node registration and
-admin tooling live in the program repo CLI and are **not** included here.
+Browser-first TypeScript SDK for **Molpha data consumers and job owners**.
+
+Use it to:
+
+- subscribe to a Molpha plan on Solana;
+- create an oracle job from an API config hash;
+- run a gateway execution round;
+- submit the threshold-signed result on-chain;
+- verify/read the latest feed value;
+- build EVM verifier arguments from the same signed result.
+
+## Protocol model
+
+Molpha turns off-chain API responses into verified on-chain data.
+
+At a high level:
+
+```text
+Job owner
+  └─ creates job on Solana with apiConfigHash + quorum settings
+
+Gateway
+  └─ coordinates a round for a job
+
+Verifier nodes
+  └─ fetch/recompute the API result independently
+  └─ sign the canonical result if valid
+
+Solana / EVM contracts
+  └─ verify quorum, registry version, signer bitmap, timestamp, and aggregate signature
+  └─ finalize or expose the verified value
+```
+
+The gateway is a coordination layer, not a trusted oracle. A result is trusted only if it carries a valid threshold signature from the selected verifier nodes for the current registry version.
+
+Molpha uses Solana as the canonical protocol chain for jobs, subscriptions, registry state, and feed state. EVM verifier contracts are stateless verification surfaces: they verify signed Molpha data updates without needing to manage subscriptions or job configuration locally.
 
 ## Install
 
 ```bash
 pnpm add @molpha-oracle/sdk
-# Solana surface is optional — only needed for `MolphaSDK` / `MolphaSolanaClient`:
-pnpm add @solana/web3.js @coral-xyz/anchor @solana/spl-token
+```
+
+Solana support is optional and only needed for `MolphaSDK` / `MolphaSolanaClient`:
+
+```bash
+pnpm add @solana/web3.js @coral-xyz/anchor @solana/spl-token bn.js
 ```
 
 | Import | Use |
 |---|---|
-| `@molpha-oracle/sdk` | Facade (`MolphaSDK`), `MolphaGateway`, `MolphaSolanaClient`, `core`, EVM helpers. Browser-safe (no `fs` in the main entry). |
-| `@molpha-oracle/sdk/utils` | `walletFromKeypairFile` — load a Solana CLI keypair as an Anchor `Wallet` (Node.js only). |
+| `@molpha-oracle/sdk` | Facade (`MolphaSDK`), `MolphaGateway`, `MolphaSolanaClient`, core types, EVM helpers. Browser-safe; no `fs` in the main entry. |
+| `@molpha-oracle/sdk/utils` | `walletFromKeypairFile` — load a Solana CLI keypair as an Anchor `Wallet`. Node.js only. |
 
-`"sideEffects": false` and ESM let gateway-only or read-only apps tree-shake the Anchor-heavy
-Solana code when they do not import it.
+The package is ESM with `"sideEffects": false`, so gateway-only or read-only apps can tree-shake the Anchor-heavy Solana path when they do not import it.
 
 ## Quick start
 
@@ -33,12 +69,14 @@ const sdk = new MolphaSDK({
 });
 
 const { result, signature } = await sdk.executeAndSubmit(jobId, {
-  apiConfig: { url: "https://api.example.com/price", responseParser: "$.price" },
+  apiConfig: {
+    url: "https://api.example.com/price",
+    responseParser: "$.price",
+  },
 });
 ```
 
-`executeAndSubmit` runs a gateway round against the current on-chain registry version and submits
-the feed update in one call.
+`executeAndSubmit` runs a gateway round against the current on-chain registry version, receives a threshold-signed data update, and submits it to Solana in one call.
 
 ## Configuration
 
@@ -47,15 +85,15 @@ the feed update in one call.
 | Option | Description |
 |---|---|
 | `connection` | Solana RPC `Connection`. |
-| `wallet` | [`MolphaWallet`](#wallet) — signs on-chain transactions and gateway auth (when possible). |
+| `wallet` | [`MolphaWallet`](#wallet). Used for Solana transactions and gateway authentication when available. |
 
-### Optional (sensible defaults)
+### Optional
 
 | Option | Default |
 |---|---|
-| `endpoints` | `DEFAULT_GATEWAY_ENDPOINT` (`http://188.166.222.245:8080`) — string or array for failover |
+| `endpoints` | `DEFAULT_GATEWAY_ENDPOINT` — string or array for failover |
 | `programId` | `MOLPHA_PROGRAM_ADDRESS` from the vendored IDL |
-| `idl` | `MOLPHA_IDL` (vendored `idl/molpha.json`) |
+| `idl` | `MOLPHA_IDL` from `idl/molpha.json` |
 | `commitment` | `"confirmed"` |
 
 ```ts
@@ -76,21 +114,22 @@ const sdk = new MolphaSDK({
 
 ## Wallet
 
-`wallet` is a single `MolphaWallet`: Anchor’s `Wallet` (Solana txs) plus gateway
-auth for `execute` / `executeAndSubmit`.
+`wallet` is a single `MolphaWallet` used across both protocol surfaces:
 
 | Layer | What it signs |
 |---|---|
-| On-chain (`MolphaSolanaClient`) | Solana transactions (`subscribe`, `createJob`, `submitDataUpdate`, …) |
-| Gateway (`MolphaGateway`) | `authMessage(jobId, timestamp)` — ed25519 over a keccak digest |
+| Solana client | Transactions such as `subscribe`, `createJob`, `submitDataUpdate` (plus simulation flows such as `verifyDataUpdate`) |
+| Gateway client | `authMessage(jobId, timestamp)` for authenticated job execution |
 
 Gateway auth is resolved automatically:
 
-1. `wallet.signAuthMessage` if set (typical for browser adapters).
-2. Else from Anchor `Wallet.payer` when the secret key is available (`walletFromKeypairFile`, Node `Wallet`).
-3. Else omitted → all-zero `authSig` (dev only; production jobs should always authenticate).
+1. Use `wallet.signAuthMessage` if provided.
+2. Else derive signing from Anchor `Wallet.payer` when the secret key is available, such as with `walletFromKeypairFile`.
+3. Else omit auth and use an all-zero `authSig`.
 
-### Utils (Node.js)
+The all-zero `authSig` path is for development only. Production jobs should authenticate gateway execution.
+
+### Node.js utility
 
 ```ts
 import { walletFromKeypairFile } from "@molpha-oracle/sdk/utils";
@@ -98,7 +137,7 @@ import { walletFromKeypairFile } from "@molpha-oracle/sdk/utils";
 const wallet = walletFromKeypairFile("~/.config/solana/id.json");
 ```
 
-### Browser
+### Browser wallet adapter
 
 ```ts
 import type { MolphaWallet } from "@molpha-oracle/sdk";
@@ -111,68 +150,138 @@ const wallet: MolphaWallet = {
 };
 ```
 
-Per-call gateway auth override: `gateway.execute({ ..., signer })` or `executeAndSubmit` with the
-same field in its options object.
+You can also override gateway auth per call with `gateway.execute({ ..., signer })` or with the same field in `executeAndSubmit`.
 
-## Usage
+## Core flow
 
-End-to-end flow via `MolphaSDK` (`sdk.solana` + `sdk.gateway`). Use
-`MolphaSolanaClient` / `MolphaGateway` standalone when you only need one side.
+Use `MolphaSDK` for the end-to-end path, or use `MolphaSolanaClient` / `MolphaGateway` separately when you only need one side.
 
 ```ts
 import { Connection } from "@solana/web3.js";
-import { MolphaSDK, PlanType, deriveApiConfigHash } from "@molpha-oracle/sdk";
+import {
+  MolphaSDK,
+  PlanType,
+  deriveApiConfigHash,
+} from "@molpha-oracle/sdk";
 import { walletFromKeypairFile } from "@molpha-oracle/sdk/utils";
 
 const sdk = new MolphaSDK({
   connection: new Connection("https://api.devnet.solana.com", "confirmed"),
   wallet: walletFromKeypairFile("~/.config/solana/id.json"),
 });
+```
 
-// 1. Subscribe to a plan — this debits USDC, so confirm the price first.
+### 1. Subscribe
+
+Subscriptions are paid in USDC on Solana.
+
+For local/dev testing on Solana Devnet, you can request test USDC from Circle's faucet: [https://faucet.circle.com/](https://faucet.circle.com/) (select `USDC` on `Solana Devnet`).
+
+```ts
 const plan = await sdk.solana.getPlan(PlanType.Basic);
-// Show `plan.subscriptionPrice` (USDC base units) to the user, then confirm:
-const { pricePaid } = await sdk.solana.subscribe(PlanType.Basic, {
-  maxPriceUsdc: plan.subscriptionPrice, // most you agree to pay; aborts if the live price is higher
-});
 
-// 2. Create a job on-chain
+// Show plan.subscriptionPrice to the user before charging.
+const { pricePaid } = await sdk.solana.subscribe(PlanType.Basic, {
+  maxPriceUsdc: plan.subscriptionPrice,
+});
+```
+
+`maxPriceUsdc` is a safety bound. The transaction aborts if the live plan price is higher than the amount the user approved.
+
+### 2. Create a job
+
+```ts
 const apiConfig = {
   url: "https://api.example.com/price",
   responseParser: "$.price",
 };
+
 const apiConfigHash = deriveApiConfigHash(apiConfig);
+
 const { jobId } = await sdk.solana.createJob({
   apiConfigHash,
   signaturesRequired: 3,
   decimals: 8,
 });
+```
 
-// 3. Run a gateway round (always uses the current on-chain registry version)
+The on-chain job stores the `apiConfigHash`, not the full API config. This commits the job to a specific off-chain data source and parsing logic while keeping large config payloads and secrets off-chain.
+
+### 3. Run a gateway round
+
+```ts
 const result = await sdk.gateway.execute({
   jobId,
   apiConfig,
-  encrypt: { secrets: { apiKey: process.env.API_KEY! } }, // optional — {{secret.apiKey}} stays off-gateway
 });
+```
 
-// 4. Submit on-chain (or simulate first with verifyDataUpdate)
+The gateway round uses the current on-chain registry version. Selected verifier nodes independently fetch/recompute the result and sign only if the observed value matches the canonical result.
+
+The returned `DataUpdateResult` includes the signed value, canonical timestamp, registry version, required quorum, signer bitmap, and aggregate signature.
+
+### 4. Submit or simulate on Solana
+
+```ts
 const { signature } = await sdk.solana.submitDataUpdate(result);
-// const { value, canonicalTimestamp } = await sdk.solana.verifyDataUpdate(result); // simulate-only
+```
 
+To simulate verification without submitting state:
+
+```ts
+const { value, canonicalTimestamp } =
+  await sdk.solana.verifyDataUpdate(result);
+```
+
+Then read the finalized feed:
+
+```ts
 const feed = await sdk.solana.readFeed(jobId);
 ```
 
-Steps 3–4 in one call: `sdk.executeAndSubmit(jobId, { apiConfig, ... })` (see [Quick start](#quick-start)).
+### One-call execution
 
-`MolphaSolanaClient.create({ connection, wallet })` and
-`new MolphaGateway(endpoints?, () => solana.getRegistryVersion())` share the same defaults as
-`MolphaSDK` (the facade wires the registry version resolver for you).
+```ts
+const { result, signature } = await sdk.executeAndSubmit(jobId, {
+  apiConfig,
+});
+```
 
-## EVM helpers
+This is equivalent to:
 
-After a gateway round, convert `DataUpdateResult` into verifier contract arguments and call
-`verify` on a deployed Molpha verifier. The SDK ships deployed testnet addresses and
-framework-agnostic tuple builders — no ethers/viem runtime dependency in the package itself.
+```ts
+const result = await sdk.gateway.execute({ jobId, apiConfig });
+const { signature } = await sdk.solana.submitDataUpdate(result);
+```
+
+## Private APIs and encrypted secrets
+
+Jobs can use private APIs without sending plaintext secrets to the gateway.
+
+```ts
+const result = await sdk.gateway.execute({
+  jobId,
+  apiConfig: {
+    url: "https://api.example.com/private-price?key={{secret.apiKey}}",
+    responseParser: "$.price",
+  },
+  encrypt: {
+    secrets: {
+      apiKey: process.env.API_KEY!,
+    },
+  },
+});
+```
+
+Secrets are encrypted into per-node envelopes. The gateway coordinates the round but should not receive plaintext API credentials.
+
+Private API execution is still an active security-sensitive surface. Do not treat encrypted secret delivery as production-ready until gateway/node-side test vectors and validation are complete.
+
+## EVM verification
+
+After a gateway round, the same signed result can be verified on EVM chains.
+
+The SDK ships deployed testnet verifier addresses and framework-agnostic tuple builders. It does not depend on ethers or viem at runtime.
 
 ### Deployed verifier addresses
 
@@ -184,8 +293,10 @@ import {
 } from "@molpha-oracle/sdk";
 
 const address = getMolphaVerifierAddress("evm-sepolia");
-// or: MOLPHA_VERIFIER_ADDRESSES["arbitrum-sepolia"]
-// or: MOLPHA_VERIFIER_EVM_SEPOLIA
+
+// or:
+const arbitrum = MOLPHA_VERIFIER_ADDRESSES["arbitrum-sepolia"];
+const ethereum = MOLPHA_VERIFIER_EVM_SEPOLIA;
 ```
 
 | Network | Constant |
@@ -195,34 +306,68 @@ const address = getMolphaVerifierAddress("evm-sepolia");
 | Avalanche Fuji | `MOLPHA_VERIFIER_AVALANCHE_FUJI` |
 | BSC testnet | `MOLPHA_VERIFIER_BSC_TESTNET` |
 
-### Build verifier args
+### Build verifier arguments
 
 ```ts
 import { buildEvmVerifierArgs } from "@molpha-oracle/sdk";
 
 const result = await sdk.gateway.execute({ jobId, apiConfig });
+
 const { dataUpdate, signature } = buildEvmVerifierArgs(result);
-// dataUpdate: [bytes32 jobId, uint32 registryVersion, uint32 signaturesRequired, bytes32 valuePacked, uint64 timestamp]
-// signature:  [bytes32 s, address commitment, uint256 signersBitmap]
 ```
 
-### Call with ethers or viem
+The generated tuples match the Molpha EVM verifier ABI:
+
+```ts
+// dataUpdate:
+// [bytes32 jobId,
+//  uint32 registryVersion,
+//  uint32 signaturesRequired,
+//  bytes32 valuePacked,
+//  uint64 timestamp]
+
+// signature:
+// [bytes32 s,
+//  address commitment,
+//  uint256 signersBitmap]
+```
+
+### ethers
 
 ```ts
 import { Contract } from "ethers";
-import { buildEvmVerifierArgs, getMolphaVerifierAddress } from "@molpha-oracle/sdk";
+import {
+  buildEvmVerifierArgs,
+  getMolphaVerifierAddress,
+} from "@molpha-oracle/sdk";
 
-const verifier = new Contract(getMolphaVerifierAddress("evm-sepolia"), abi, signer);
+const verifier = new Contract(
+  getMolphaVerifierAddress("evm-sepolia"),
+  abi,
+  signer,
+);
+
 const { dataUpdate, signature } = buildEvmVerifierArgs(result);
+
 await verifier.verify(dataUpdate, signature);
 ```
 
+### viem
+
 ```ts
 import { createPublicClient, http } from "viem";
-import { buildEvmVerifierArgs, MOLPHA_VERIFIER_EVM_SEPOLIA } from "@molpha-oracle/sdk";
+import {
+  buildEvmVerifierArgs,
+  MOLPHA_VERIFIER_EVM_SEPOLIA,
+} from "@molpha-oracle/sdk";
 
-const client = createPublicClient({ chain, transport: http() });
+const client = createPublicClient({
+  chain,
+  transport: http(),
+});
+
 const { dataUpdate, signature } = buildEvmVerifierArgs(result);
+
 await client.readContract({
   address: MOLPHA_VERIFIER_EVM_SEPOLIA,
   abi,
@@ -231,20 +376,91 @@ await client.readContract({
 });
 ```
 
-Lower-level helpers (`toFixedHex`, `signersBitmapToUint256`, `signersBitmapToDecimal`) are also
-exported when you need to assemble arguments manually.
+Lower-level helpers are also exported for manual integrations:
+
+```ts
+import {
+  toFixedHex,
+  signersBitmapToUint256,
+  signersBitmapToDecimal,
+} from "@molpha-oracle/sdk";
+```
+
+## What verification checks
+
+A Molpha data update is valid only if the verifier can confirm:
+
+- the update targets the expected `jobId`;
+- the result was signed against a specific `registryVersion`;
+- the quorum satisfies `signaturesRequired`;
+- the signer bitmap maps to valid selected nodes;
+- the aggregate Schnorr signature is valid;
+- the signed value and canonical timestamp match the message;
+- the timestamp is within the accepted freshness bounds;
+- on Solana verification paths, the job’s API config hash matches the committed job configuration.
+
+Solana verification finalizes feed state. EVM verification is stateless and returns whether the signed Molpha update is valid for the deployed verifier registry.
 
 ## IDL vendoring
 
-The on-chain client needs the program Anchor IDL (`target/idl/molpha.json` in the program repo).
-A copy ships under `idl/` and is the default. Override `idl` and `programId` when targeting another
-deployment; keep the vendored file aligned with the program you ship against.
+The Solana client needs the Anchor IDL for the Molpha program.
+
+A vendored copy ships under `idl/` and is used by default:
+
+```ts
+import { MOLPHA_IDL, MOLPHA_PROGRAM_ADDRESS } from "@molpha-oracle/sdk";
+```
+
+Override `idl` and `programId` when targeting another deployment.
+
+Keep the vendored IDL aligned with the deployed program. Mismatched IDL/program versions can produce invalid account derivations, decoding errors, or failed instruction simulation.
+
+## Standalone clients
+
+`MolphaSDK` is a convenience facade.
+
+You can also use the lower-level clients directly:
+
+```ts
+import {
+  MolphaSolanaClient,
+  MolphaGateway,
+} from "@molpha-oracle/sdk";
+
+const solana = MolphaSolanaClient.create({
+  connection,
+  wallet,
+});
+
+const gateway = new MolphaGateway(
+  endpoints,
+  () => solana.getRegistryVersion(),
+);
+```
+
+The facade wires the registry version resolver automatically.
 
 ## Status
 
-`0.1.0` — first iteration. Solana paths (selection bitmap, previous-version remap,
-`verify_data_update` decode) are aligned with the `molpha` program in this repo. Gateway envelope
-encryption still needs gateway/node-side vector validation before production rollout.
+`0.1.0` — first public SDK iteration.
+
+Current scope:
+
+- Solana subscription flow;
+- Solana job creation;
+- gateway execution;
+- Solana data update verification/submission;
+- EVM verifier argument building;
+- deployed testnet verifier address helpers.
+
+Known limitations:
+
+- private API envelope encryption still needs gateway/node-side test-vector validation;
+- verifier-node registration and admin tooling are intentionally outside this package;
+- production deployments should use authenticated gateway execution;
+- testnet verifier addresses may change between protocol releases.
+
+Solana paths such as selection bitmap, previous-version remap, and `verify_data_update` decoding are aligned with the Molpha program version vendored in this repo.
 
 ## Develop
 
@@ -257,49 +473,69 @@ pnpm build
 
 ## Releasing
 
-Versioning and publishing are automated with [changesets](https://github.com/changesets/changesets).
-Versions follow [semver](https://semver.org) and are driven by the **nature of each change**, not the
-branch it merges from.
+Versioning and publishing are automated with Changesets.
+
+Versions follow semver and are driven by the nature of each change, not by the branch it merges from.
 
 ### Workflow
 
-1. With your change, add a changeset describing the bump:
+1. Add a changeset with your change:
 
    ```bash
    pnpm changeset
    ```
 
-   Choose `patch` (fix), `minor` (feature), or `major` (breaking). Note: changesets applies the
-   bump literally — a `major` changeset on `0.x` jumps straight to `1.0.0`. While the package is
-   pre-`1.0.0`, pick `minor` for breaking changes and `patch` for features/fixes, and only select
-   `major` when you intend to cut `1.0.0`.
+   Choose:
 
-2. **Stable releases (`main`):** when changes land on `main`, the `Release` workflow opens a
-   "release" PR that bumps `package.json` and updates `CHANGELOG.md`. Merging that PR publishes
-   to npm on the `latest` tag.
+   - `patch` for fixes;
+   - `minor` for features;
+   - `major` for breaking changes.
+
+   While the package is pre-`1.0.0`, use `minor` for breaking changes and `patch` for features/fixes. Only select `major` when intentionally cutting `1.0.0`.
+
+2. Stable releases from `main`
+
+   When changes land on `main`, the release workflow opens a release PR that bumps `package.json` and updates `CHANGELOG.md`.
+
+   Merging that PR publishes to npm on the `latest` tag:
 
    ```bash
    npm install @molpha-oracle/sdk
    ```
 
-3. **Prereleases (`dev`):** pushes to `dev` publish a snapshot (e.g. `0.2.0-dev-<timestamp>`) on the
-   `dev` dist-tag, for early testing. Requires at least one pending changeset.
+3. Prereleases from `dev`
+
+   Pushes to `dev` publish a snapshot version on the `dev` dist-tag, for example:
+
+   ```text
+   0.2.0-dev-<timestamp>
+   ```
+
+   Install with:
 
    ```bash
    npm install @molpha-oracle/sdk@dev
    ```
 
+   Requires at least one pending changeset.
+
 ### One-time setup
 
-1. Add an automation `NPM_TOKEN` (a granular/automation npm token with publish access to the
-   `@molpha-oracle` scope) under **Settings → Secrets and variables → Actions** in the GitHub repo.
-   The built-in `GITHUB_TOKEN` handles opening the release PR.
-2. **Publish a stable release from `main` first.** npm assigns the first published version to the
-   `latest` tag no matter the `--tag`, so if a `dev` snapshot is published before any stable release,
-   that prerelease becomes `latest`. The `dev` workflow guards against this and will fail until a
-   stable `latest` exists.
+1. Add `NPM_TOKEN` under GitHub repo settings:
 
-If `latest` ever ends up on a prerelease, repoint it after a stable version is published:
+   ```text
+   Settings → Secrets and variables → Actions
+   ```
+
+   Use a granular npm automation token with publish access to the `@molpha-oracle` scope.
+
+2. Publish a stable release from `main` first.
+
+   npm assigns the first published version to the `latest` tag regardless of `--tag`. If a `dev` snapshot is published before any stable release, that prerelease can become `latest`.
+
+   The `dev` workflow should guard against this and fail until a stable `latest` exists.
+
+If `latest` ever points to a prerelease, repoint it after publishing a stable version:
 
 ```bash
 npm dist-tag add @molpha-oracle/sdk@<stable-version> latest
