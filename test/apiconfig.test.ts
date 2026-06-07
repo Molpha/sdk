@@ -18,7 +18,7 @@ describe("canonicalizeAPIConfig", () => {
       method: "GET",
       headers: {},
       responseParser: "$.price",
-      valueTransform: "multiply:1e6",
+      valueTransform: "",
     });
   });
 });
@@ -36,11 +36,18 @@ describe("deriveApiConfigHash", () => {
 
   it("matches node test vector", () => {
     expect(bytesToHex(deriveApiConfigHash(minimal))).toBe(
-      "49919e2078d1021a3a792993bdd3a332a1fa0d6c548a327ac7bc8e3c2b61002a",
+      "2f00de126dd0f45e8a7f0a9854139d64e47b2f9707235406dc1c9c32d6fb9582",
     );
   });
 
-  it("matches explicit defaults", () => {
+  it("injects the backend-compatible empty valueTransform default", () => {
+    const explicitDefault = {
+      url: "https://api.example.com/price",
+      method: "GET" as const,
+      headers: {},
+      responseParser: "$.price",
+      valueTransform: "",
+    };
     const explicit = {
       url: "https://api.example.com/price",
       method: "GET" as const,
@@ -48,7 +55,10 @@ describe("deriveApiConfigHash", () => {
       responseParser: "$.price",
       valueTransform: "multiply:1e6",
     };
-    expect(deriveApiConfigHash(minimal)).toEqual(deriveApiConfigHash(explicit));
+    expect(deriveApiConfigHash(minimal)).toEqual(deriveApiConfigHash(explicitDefault));
+    expect(deriveApiConfigHash(minimal)).not.toEqual(
+      deriveApiConfigHash(explicit),
+    );
   });
 
   it("is stable and sensitive to config changes", () => {

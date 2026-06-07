@@ -34,6 +34,31 @@ export interface ExecuteOptions {
   maxRetries?: number;
   /** Per-request timeout in ms. Default 5000. */
   timeoutMs?: number;
+  /**
+   * Pre-fetched round inputs. Any field present here skips its network/on-chain
+   * fetch, so a fully-populated context turns `execute` into a single POST round
+   * (the "short" flow). Build a reusable one with
+   * {@link MolphaGateway.prepareContext}.
+   *
+   * Caching is opt-in because these inputs can drift: a stale `registryVersion`
+   * or `nodes` set produces a result the chain will reject. Refresh the context
+   * when the on-chain registry version changes.
+   */
+  context?: Partial<ExecuteContext>;
+}
+
+/**
+ * The slow-changing inputs an `execute` round binds to. Fetch once with
+ * {@link MolphaGateway.prepareContext} and reuse across many rounds to skip the
+ * registry/nodes/jobConfig prelude.
+ */
+export interface ExecuteContext {
+  /** On-chain registry version the round is bound to. */
+  registryVersion: number;
+  /** Full node set used to derive the selection bitmap. */
+  nodes: Node[];
+  /** Per-job quorum configuration. */
+  jobConfig: JobConfig;
 }
 
 interface GatewayExecuteResponse {
@@ -60,6 +85,9 @@ interface GatewayEnvelope<T> {
 }
 
 const ZERO_AUTH_SIG = new Uint8Array(64);
+const JOB_CONFIG_RETRY_ATTEMPTS = 10;
+const JOB_CONFIG_RETRY_INITIAL_DELAY_MS = 250;
+const JOB_CONFIG_RETRY_MAX_DELAY_MS = 2000;
 
 /** Default gateway base URL when `endpoints` is omitted. */
 export const DEFAULT_GATEWAY_ENDPOINT = "http://188.166.222.245:8080";
@@ -121,9 +149,31 @@ export class MolphaGateway {
   }
 
   /**
+   * Fetch the slow-changing round inputs (registry version, node set, job
+   * config) once so they can be reused across many {@link execute} calls. Pass
+   * the result back via `execute({ ..., context })` to skip the prelude and run
+   * a single-round "short" flow.
+   *
+   * All three fetches run in parallel.
+   */
+  async prepareContext(jobId: string): Promise<ExecuteContext> {
+    const [registryVersion, nodes, jobConfig] = await Promise.all([
+      this.getRegistryVersion(),
+      this.getNodes(),
+      this.getJobConfigWithRetry(jobId),
+    ]);
+    return { registryVersion, nodes, jobConfig };
+  }
+
+  /**
    * Run a gateway round with retry + failover. Per attempt a fresh timestamp
    * yields a fresh selection bitmap; the body is POSTed to each endpoint in
    * order until one `completed`s.
+   *
+   * By default this fetches the registry version, node set, and job config up
+   * front (in parallel). Supply `opts.context` (e.g. from
+   * {@link prepareContext}) to reuse cached inputs and skip those fetches — a
+   * fully-populated context collapses `execute` to a single POST round.
    */
   async execute(opts: ExecuteOptions): Promise<DataUpdateResult> {
     const {
@@ -136,12 +186,11 @@ export class MolphaGateway {
       timeoutMs = 5000,
     } = opts;
 
-    const registryVersion = await this.getRegistryVersion();
     const jobIdBytes = hexToBytes(jobId);
-    const [nodes, jobConfig] = await Promise.all([
-      this.getNodes(),
-      this.getJobConfig(jobId),
-    ]);
+    const { registryVersion, nodes, jobConfig } = await this.resolveContext(
+      jobId,
+      opts.context,
+    );
 
     const requestApiConfig = canonicalizeAPIConfig(apiConfig);
 
@@ -181,18 +230,25 @@ export class MolphaGateway {
             body,
             timeoutMs,
           );
+          const errorDetail = !res.ok ? await parseGatewayErrorDetail(res) : undefined;
           if (res.status === 400 || res.status === 401) {
             throw new GatewayError(
-              `Gateway rejected request (${res.status})`,
+              formatGatewayErrorMessage("Gateway rejected request", res.status, errorDetail),
               res.status,
             );
           }
           if (res.status === 503) {
-            lastError = new GatewayError("Gateway unavailable (503)", 503);
+            lastError = new GatewayError(
+              formatGatewayErrorMessage("Gateway unavailable", 503, errorDetail),
+              503,
+            );
             continue; // a different gateway may already hold the AggSig
           }
           if (!res.ok) {
-            lastError = new GatewayError(`Gateway error (${res.status})`, res.status);
+            lastError = new GatewayError(
+              formatGatewayErrorMessage("Gateway error", res.status, errorDetail),
+              res.status,
+            );
             continue;
           }
           const json = (await res.json()) as GatewayExecuteResponse;
@@ -222,6 +278,28 @@ export class MolphaGateway {
       : new Error("Gateway round failed after retries");
   }
 
+  /**
+   * Resolve the round inputs, fetching only the fields absent from `cached`.
+   * Whatever fetching remains runs in parallel.
+   */
+  private async resolveContext(
+    jobId: string,
+    cached?: Partial<ExecuteContext>,
+  ): Promise<ExecuteContext> {
+    const [registryVersion, nodes, jobConfig] = await Promise.all([
+      cached?.registryVersion !== undefined
+        ? Promise.resolve(cached.registryVersion)
+        : this.getRegistryVersion(),
+      cached?.nodes !== undefined
+        ? Promise.resolve(cached.nodes)
+        : this.getNodes(),
+      cached?.jobConfig !== undefined
+        ? Promise.resolve(cached.jobConfig)
+        : this.getJobConfigWithRetry(jobId),
+    ]);
+    return { registryVersion, nodes, jobConfig };
+  }
+
   private async firstReachableData<T>(path: string): Promise<T> {
     let lastError: unknown;
     for (const endpoint of this.endpoints) {
@@ -246,6 +324,34 @@ export class MolphaGateway {
     throw lastError instanceof Error ? lastError : new Error(`GET ${path} failed`);
   }
 
+  private async getJobConfigWithRetry(jobId: string): Promise<JobConfig> {
+    let lastError: unknown;
+    let delayMs = JOB_CONFIG_RETRY_INITIAL_DELAY_MS;
+
+    for (let attempt = 0; attempt < JOB_CONFIG_RETRY_ATTEMPTS; attempt++) {
+      try {
+        return await this.getJobConfig(jobId);
+      } catch (err) {
+        if (!(err instanceof GatewayError && err.status === 404)) {
+          throw err;
+        }
+        lastError = err;
+      }
+
+      if (attempt < JOB_CONFIG_RETRY_ATTEMPTS - 1) {
+        await sleep(delayMs);
+        delayMs = Math.min(
+          Math.floor(delayMs * 1.5),
+          JOB_CONFIG_RETRY_MAX_DELAY_MS,
+        );
+      }
+    }
+
+    throw lastError instanceof Error
+      ? lastError
+      : new GatewayError(`GET /v1/jobs/${jobId}/config failed`, 404);
+  }
+
   private async post(
     url: string,
     body: unknown,
@@ -263,6 +369,39 @@ export class MolphaGateway {
     } finally {
       clearTimeout(timer);
     }
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function formatGatewayErrorMessage(
+  prefix: string,
+  status: number,
+  detail?: string,
+): string {
+  if (!detail) return `${prefix} (${status})`;
+  return `${prefix} (${status}): ${detail}`;
+}
+
+async function parseGatewayErrorDetail(res: Response): Promise<string | undefined> {
+  try {
+    const text = (await res.text()).trim();
+    if (!text) return undefined;
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      if (parsed && typeof parsed === "object") {
+        const record = parsed as Record<string, unknown>;
+        const message = record.error ?? record.message ?? record.detail;
+        if (typeof message === "string" && message.trim()) return message.trim();
+      }
+    } catch {
+      // fall back to raw body below
+    }
+    return text;
+  } catch {
+    return undefined;
   }
 }
 
