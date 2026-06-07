@@ -34,6 +34,31 @@ export interface ExecuteOptions {
   maxRetries?: number;
   /** Per-request timeout in ms. Default 5000. */
   timeoutMs?: number;
+  /**
+   * Pre-fetched round inputs. Any field present here skips its network/on-chain
+   * fetch, so a fully-populated context turns `execute` into a single POST round
+   * (the "short" flow). Build a reusable one with
+   * {@link MolphaGateway.prepareContext}.
+   *
+   * Caching is opt-in because these inputs can drift: a stale `registryVersion`
+   * or `nodes` set produces a result the chain will reject. Refresh the context
+   * when the on-chain registry version changes.
+   */
+  context?: Partial<ExecuteContext>;
+}
+
+/**
+ * The slow-changing inputs an `execute` round binds to. Fetch once with
+ * {@link MolphaGateway.prepareContext} and reuse across many rounds to skip the
+ * registry/nodes/jobConfig prelude.
+ */
+export interface ExecuteContext {
+  /** On-chain registry version the round is bound to. */
+  registryVersion: number;
+  /** Full node set used to derive the selection bitmap. */
+  nodes: Node[];
+  /** Per-job quorum configuration. */
+  jobConfig: JobConfig;
 }
 
 interface GatewayExecuteResponse {
@@ -124,9 +149,31 @@ export class MolphaGateway {
   }
 
   /**
+   * Fetch the slow-changing round inputs (registry version, node set, job
+   * config) once so they can be reused across many {@link execute} calls. Pass
+   * the result back via `execute({ ..., context })` to skip the prelude and run
+   * a single-round "short" flow.
+   *
+   * All three fetches run in parallel.
+   */
+  async prepareContext(jobId: string): Promise<ExecuteContext> {
+    const [registryVersion, nodes, jobConfig] = await Promise.all([
+      this.getRegistryVersion(),
+      this.getNodes(),
+      this.getJobConfigWithRetry(jobId),
+    ]);
+    return { registryVersion, nodes, jobConfig };
+  }
+
+  /**
    * Run a gateway round with retry + failover. Per attempt a fresh timestamp
    * yields a fresh selection bitmap; the body is POSTed to each endpoint in
    * order until one `completed`s.
+   *
+   * By default this fetches the registry version, node set, and job config up
+   * front (in parallel). Supply `opts.context` (e.g. from
+   * {@link prepareContext}) to reuse cached inputs and skip those fetches — a
+   * fully-populated context collapses `execute` to a single POST round.
    */
   async execute(opts: ExecuteOptions): Promise<DataUpdateResult> {
     const {
@@ -139,12 +186,11 @@ export class MolphaGateway {
       timeoutMs = 5000,
     } = opts;
 
-    const registryVersion = await this.getRegistryVersion();
     const jobIdBytes = hexToBytes(jobId);
-    const [nodes, jobConfig] = await Promise.all([
-      this.getNodes(),
-      this.getJobConfigWithRetry(jobId),
-    ]);
+    const { registryVersion, nodes, jobConfig } = await this.resolveContext(
+      jobId,
+      opts.context,
+    );
 
     const requestApiConfig = canonicalizeAPIConfig(apiConfig);
 
@@ -230,6 +276,28 @@ export class MolphaGateway {
     throw lastError instanceof Error
       ? lastError
       : new Error("Gateway round failed after retries");
+  }
+
+  /**
+   * Resolve the round inputs, fetching only the fields absent from `cached`.
+   * Whatever fetching remains runs in parallel.
+   */
+  private async resolveContext(
+    jobId: string,
+    cached?: Partial<ExecuteContext>,
+  ): Promise<ExecuteContext> {
+    const [registryVersion, nodes, jobConfig] = await Promise.all([
+      cached?.registryVersion !== undefined
+        ? Promise.resolve(cached.registryVersion)
+        : this.getRegistryVersion(),
+      cached?.nodes !== undefined
+        ? Promise.resolve(cached.nodes)
+        : this.getNodes(),
+      cached?.jobConfig !== undefined
+        ? Promise.resolve(cached.jobConfig)
+        : this.getJobConfigWithRetry(jobId),
+    ]);
+    return { registryVersion, nodes, jobConfig };
   }
 
   private async firstReachableData<T>(path: string): Promise<T> {

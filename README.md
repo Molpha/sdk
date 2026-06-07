@@ -9,7 +9,7 @@ Use it to:
 - run a gateway execution round;
 - submit the threshold-signed result on-chain;
 - verify/read the latest feed value;
-- build EVM verifier arguments from the same signed result.
+- build EVM and Starknet verifier arguments from the same signed result.
 
 ## Protocol model
 
@@ -28,14 +28,14 @@ Verifier nodes
   └─ fetch/recompute the API result independently
   └─ sign the canonical result if valid
 
-Solana / EVM contracts
+Solana / EVM / Starknet verifiers
   └─ verify quorum, registry version, signer bitmap, timestamp, and aggregate signature
   └─ finalize or expose the verified value
 ```
 
 The gateway is a coordination layer, not a trusted oracle. A result is trusted only if it carries a valid threshold signature from the selected verifier nodes for the current registry version.
 
-Molpha uses Solana as the canonical protocol chain for jobs, subscriptions, registry state, and feed state. EVM verifier contracts are stateless verification surfaces: they verify signed Molpha data updates without needing to manage subscriptions or job configuration locally.
+Molpha uses Solana as the canonical protocol chain for jobs, subscriptions, registry state, and feed state. EVM and Starknet verifier contracts are stateless verification surfaces: they verify signed Molpha data updates without needing to manage subscriptions or job configuration locally.
 
 ## Install
 
@@ -51,7 +51,7 @@ pnpm add @solana/web3.js @coral-xyz/anchor @solana/spl-token bn.js
 
 | Import | Use |
 |---|---|
-| `@molpha-oracle/sdk` | Facade (`MolphaSDK`), `MolphaGateway`, `MolphaSolanaClient`, core types, EVM helpers. Browser-safe; no `fs` in the main entry. |
+| `@molpha-oracle/sdk` | Facade (`MolphaSDK`), `MolphaGateway`, `MolphaSolanaClient`, core types, EVM/Starknet helpers. Browser-safe; no `fs` in the main entry. |
 | `@molpha-oracle/sdk/utils` | `walletFromKeypairFile` — load a Solana CLI keypair as an Anchor `Wallet`. Node.js only. |
 
 The package is ESM with `"sideEffects": false`, so gateway-only or read-only apps can tree-shake the Anchor-heavy Solana path when they do not import it.
@@ -254,6 +254,37 @@ const result = await sdk.gateway.execute({ jobId, apiConfig });
 const { signature } = await sdk.solana.submitDataUpdate(result);
 ```
 
+### Fast execution with a cached context
+
+By default every `execute` fetches three slow-changing inputs up front (in
+parallel): the on-chain registry version, the node set, and the job config.
+When you run many rounds for the same job, fetch these once and reuse them so
+each round is a single gateway POST.
+
+```ts
+// Fetch registryVersion + nodes + jobConfig once.
+const context = await sdk.gateway.prepareContext(jobId);
+
+// Reuse it across rounds — no prelude fetches.
+const result = await sdk.gateway.execute({ jobId, apiConfig, context });
+```
+
+`context` is a `Partial<ExecuteContext>`, so you can cache only what you have
+and let `execute` fetch the rest:
+
+```ts
+const result = await sdk.gateway.execute({
+  jobId,
+  apiConfig,
+  context: { nodes, jobConfig }, // registryVersion still fetched fresh
+});
+```
+
+Caching is opt-in because these inputs can drift. A stale `registryVersion` (or
+node set) yields a result the chain will reject — refresh the context when the
+on-chain registry version changes. The same `context` field is accepted by
+`executeAndSubmit`.
+
 ## Private APIs and encrypted secrets
 
 Jobs can use private APIs without sending plaintext secrets to the gateway.
@@ -386,6 +417,72 @@ import {
 } from "@molpha-oracle/sdk";
 ```
 
+## Starknet verification
+
+After a gateway round, the same signed result can be verified on Starknet.
+
+The SDK ships deployed testnet verifier addresses and framework-agnostic struct
+builders. It does not depend on `starknet.js` at runtime.
+
+### Deployed verifier addresses
+
+```ts
+import {
+  MOLPHA_VERIFIER_STARKNET_ADDRESSES,
+  MOLPHA_VERIFIER_STARKNET_SEPOLIA,
+  getMolphaStarknetVerifierAddress,
+} from "@molpha-oracle/sdk";
+
+const address = getMolphaStarknetVerifierAddress("starknet-sepolia");
+
+// or:
+const sepolia = MOLPHA_VERIFIER_STARKNET_ADDRESSES["starknet-sepolia"];
+const sepoliaDirect = MOLPHA_VERIFIER_STARKNET_SEPOLIA;
+```
+
+| Network | Constant |
+|---|---|
+| Starknet Sepolia | `MOLPHA_VERIFIER_STARKNET_SEPOLIA` |
+
+### Build verifier arguments
+
+```ts
+import { buildStarknetVerifierArgs } from "@molpha-oracle/sdk";
+
+const result = await sdk.gateway.execute({ jobId, apiConfig });
+
+const { dataUpdate, signature } = buildStarknetVerifierArgs(result);
+```
+
+The generated objects match the Molpha Starknet verifier interface:
+
+```ts
+// dataUpdate:
+// {
+//   job_id: u256,
+//   registry_version: u32,
+//   signatures_required: u32,
+//   value: u256,
+//   canonical_timestamp: u64,
+// }
+
+// signature:
+// {
+//   signature: u256,
+//   commitment: felt252, // EVM-style 20-byte address as felt
+//   signers_bitmap: u256,
+// }
+```
+
+Lower-level helpers are also exported:
+
+```ts
+import {
+  commitmentAddressToStarknetFelt,
+  signersBitmapToStarknetUint256,
+} from "@molpha-oracle/sdk";
+```
+
 ## What verification checks
 
 A Molpha data update is valid only if the verifier can confirm:
@@ -399,7 +496,7 @@ A Molpha data update is valid only if the verifier can confirm:
 - the timestamp is within the accepted freshness bounds;
 - on Solana verification paths, the job’s API config hash matches the committed job configuration.
 
-Solana verification finalizes feed state. EVM verification is stateless and returns whether the signed Molpha update is valid for the deployed verifier registry.
+Solana verification finalizes feed state. EVM and Starknet verification are stateless and return whether the signed Molpha update is valid for the deployed verifier registry.
 
 ## IDL vendoring
 
@@ -451,6 +548,7 @@ Current scope:
 - gateway execution;
 - Solana data update verification/submission;
 - EVM verifier argument building;
+- Starknet verifier argument building;
 - deployed testnet verifier address helpers.
 
 Known limitations:

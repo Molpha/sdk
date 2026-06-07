@@ -18,6 +18,7 @@ import { gatewaySignerFromWallet, type MolphaWallet } from "./wallet.js";
 export * from "./core/index.js";
 export * from "./gateway/index.js";
 export * from "./evm/index.js";
+export * from "./starknet/index.js";
 export * from "./solana/index.js";
 export { MOLPHA_IDL, MOLPHA_PROGRAM_ADDRESS } from "../idl/index.js";
 export { gatewaySignerFromWallet, signerFromKeypair, type MolphaWallet } from "./wallet.js";
