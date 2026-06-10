@@ -30,6 +30,21 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
 
+      - name: Sync baseline from main
+        # The snapshot version is calculated from the current package.json version plus the
+        # pending changesets (useCalculatedVersion: true). Release commits ("chore: release")
+        # that bump package.json and delete consumed changesets only land on `main`, so without
+        # this step `dev` stays anchored to a stale baseline (e.g. 0.1.0) and republishes
+        # already-released changesets, producing snapshots BELOW the real `latest`.
+        # Merging `main` brings package.json up to the released version and prunes changesets
+        # that main already consumed, while keeping genuinely-new changesets on `dev`.
+        # The merge is local to the runner (not pushed); snapshots publish with --no-git-tag.
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git merge --no-edit origin/main
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
