@@ -3,6 +3,23 @@
   "version": "0.1.0",
   "description": "Molpha Consumer SDK — subscribe, create jobs, run gateway rounds, submit and read on-chain feeds.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Molpha/sdk.git"
+  },
+  "homepage": "https://github.com/Molpha/sdk#readme",
+  "bugs": {
+    "url": "https://github.com/Molpha/sdk/issues"
+  },
+  "keywords": [
+    "molpha",
+    "oracle",
+    "solana",
+    "evm",
+    "starknet",
+    "data-feeds",
+    "web3"
+  ],
   "type": "module",
   "sideEffects": false,
   "files": [

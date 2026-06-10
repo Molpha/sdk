@@ -3,3 +3,12 @@ dist/
 *.tsbuildinfo
 .DS_Store
 .pnpm-store
+scripts/molpha-consumer-e2e-demo.ts
+
+# Secrets — never commit
+.env
+.env.*
+test-keypair.json
+*keypair*.json
+*.pem
+id.json
