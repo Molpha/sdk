@@ -25,7 +25,11 @@ import { encryptForNodes } from "./encryption.js";
 export interface ExecuteOptions {
   jobId: string;
   apiConfig: APIConfig;
-  /** Omitted ⇒ all-zero authSig (dev only). */
+  /**
+   * Signs `authMessage(jobId, timestamp)`. Overrides the gateway's
+   * `defaultSigner` when set. When both are omitted, sends all-zero authSig
+   * (dev only).
+   */
   signer?: Signer;
   encrypt?: { secrets: Record<string, string> };
   /** Max accepted value age in seconds. Default 60. */
@@ -106,6 +110,7 @@ export class GatewayError extends Error {
 export class MolphaGateway {
   private readonly endpoints: string[];
   private readonly getRegistryVersion: () => Promise<number>;
+  private readonly defaultSigner?: Signer;
 
   constructor(
     endpoints?: string | string[],
@@ -114,6 +119,7 @@ export class MolphaGateway {
         "MolphaGateway requires getRegistryVersion to execute — pass the current on-chain version (e.g. () => solana.getRegistryVersion())",
       );
     },
+    defaultSigner?: Signer,
   ) {
     const list =
       endpoints === undefined
@@ -124,6 +130,7 @@ export class MolphaGateway {
     if (list.length === 0) throw new Error("At least one endpoint is required");
     this.endpoints = list.map((e) => e.replace(/\/$/, ""));
     this.getRegistryVersion = getRegistryVersion;
+    this.defaultSigner = defaultSigner;
   }
 
   /** Tries endpoints in order; returns the first node list it can fetch. */
@@ -208,8 +215,9 @@ export class MolphaGateway {
       const indices = selectedIndices(bitmap, nodes.length);
       const selected = nodes.filter((n) => indices.includes(n.index));
 
-      const authSig = signer
-        ? await signer(authMessage(jobIdBytes, timestamp))
+      const authSigner = signer ?? this.defaultSigner;
+      const authSig = authSigner
+        ? await authSigner(authMessage(jobIdBytes, timestamp))
         : ZERO_AUTH_SIG;
 
       const body: Record<string, unknown> = {
