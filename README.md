@@ -64,7 +64,7 @@ import { MolphaSDK } from "@molpha-oracle/sdk";
 import { walletFromKeypairFile } from "@molpha-oracle/sdk/utils";
 
 const sdk = new MolphaSDK({
-  connection: new Connection("https://api.devnet.solana.com", "confirmed"),
+  connection: new Connection("https://api.devnet.solana.com", "finalized"),
   wallet: walletFromKeypairFile("~/.config/solana/id.json"),
 });
 
@@ -121,11 +121,16 @@ const sdk = new MolphaSDK({
 | Solana client | Transactions such as `subscribe`, `createJob`, `submitDataUpdate` (plus simulation flows such as `verifyDataUpdate`) |
 | Gateway client | `authMessage(jobId, timestamp)` for authenticated job execution |
 
-Gateway auth is resolved automatically:
+Gateway auth is resolved automatically when you use `MolphaSDK`:
 
 1. Use `wallet.signAuthMessage` if provided.
 2. Else derive signing from Anchor `Wallet.payer` when the secret key is available, such as with `walletFromKeypairFile`.
 3. Else omit auth and use an all-zero `authSig`.
+
+`MolphaSDK` passes the resolved signer to `sdk.gateway` as its default, so
+`sdk.gateway.execute({ jobId, apiConfig })` authenticates without an explicit
+`signer`. Standalone `new MolphaGateway(...)` omits auth unless you pass a
+`defaultSigner` (third constructor arg) or per-call `signer`.
 
 The all-zero `authSig` path is for development only. Production jobs should authenticate gateway execution.
 

@@ -10,7 +10,7 @@ import { PublicKey } from "@solana/web3.js";
 import type { Idl } from "@coral-xyz/anchor";
 import { type ExecuteOptions, MolphaGateway } from "./gateway/index.js";
 import { MolphaSolanaClient } from "./solana/client.js";
-import type { DataUpdateResult, Signer } from "./core/types.js";
+import type { DataUpdateResult } from "./core/types.js";
 import { MOLPHA_IDL, MOLPHA_PROGRAM_ADDRESS } from "../idl/index.js";
 import { gatewaySignerFromWallet, type MolphaWallet } from "./wallet.js";
 
@@ -39,7 +39,6 @@ export interface MolphaSDKOptions {
 export class MolphaSDK {
   readonly gateway: MolphaGateway;
   readonly solana: MolphaSolanaClient;
-  private readonly defaultSigner?: Signer;
 
   constructor(opts: MolphaSDKOptions) {
     this.solana = MolphaSolanaClient.create({
@@ -52,8 +51,8 @@ export class MolphaSDK {
     this.gateway = new MolphaGateway(
       opts.endpoints,
       () => this.solana.getRegistryVersion(),
+      gatewaySignerFromWallet(opts.wallet),
     );
-    this.defaultSigner = gatewaySignerFromWallet(opts.wallet);
   }
 
   /**
@@ -64,11 +63,7 @@ export class MolphaSDK {
     jobId: string,
     opts: Omit<ExecuteOptions, "jobId">,
   ): Promise<{ result: DataUpdateResult; signature: string }> {
-    const result = await this.gateway.execute({
-      jobId,
-      ...(this.defaultSigner ? { signer: this.defaultSigner } : {}),
-      ...opts,
-    });
+    const result = await this.gateway.execute({ jobId, ...opts });
     const { signature } = await this.solana.submitDataUpdate(result);
     return { result, signature };
   }

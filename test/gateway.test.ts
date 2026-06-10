@@ -142,6 +142,64 @@ describe("MolphaGateway.execute failover", () => {
   });
 });
 
+describe("MolphaGateway defaultSigner", () => {
+  it("uses defaultSigner when execute omits signer", async () => {
+    const defaultSigner = vi.fn(async () => new Uint8Array(64).fill(0xab));
+    let postedBody: Record<string, unknown> | undefined;
+
+    globalThis.fetch = mockFetch(() => {
+      return jsonResponse({ status: "completed", value: "1" });
+    }) as unknown as typeof fetch;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "POST" && url.endsWith("/execute")) {
+        postedBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return jsonResponse({ status: "completed", value: "1" });
+      }
+      if (url.endsWith("/nodes")) return jsonResponse(nodes);
+      if (url.endsWith("/config")) return jsonResponse(jobConfig);
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as unknown as typeof fetch;
+
+    const gw = new MolphaGateway("http://gw1", async () => 1, defaultSigner);
+    await gw.execute({
+      jobId: JOB_ID,
+      apiConfig: { url: "http://api", responseParser: "$.price" },
+    });
+
+    expect(defaultSigner).toHaveBeenCalledTimes(1);
+    expect(postedBody?.authSig).toBe("ab".repeat(64));
+  });
+
+  it("prefers per-call signer over defaultSigner", async () => {
+    const defaultSigner = vi.fn(async () => new Uint8Array(64).fill(0xab));
+    const overrideSigner = vi.fn(async () => new Uint8Array(64).fill(0xcd));
+    let postedBody: Record<string, unknown> | undefined;
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "POST" && url.endsWith("/execute")) {
+        postedBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return jsonResponse({ status: "completed", value: "1" });
+      }
+      if (url.endsWith("/nodes")) return jsonResponse(nodes);
+      if (url.endsWith("/config")) return jsonResponse(jobConfig);
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as unknown as typeof fetch;
+
+    const gw = new MolphaGateway("http://gw1", async () => 1, defaultSigner);
+    await gw.execute({
+      jobId: JOB_ID,
+      apiConfig: { url: "http://api", responseParser: "$.price" },
+      signer: overrideSigner,
+    });
+
+    expect(defaultSigner).not.toHaveBeenCalled();
+    expect(overrideSigner).toHaveBeenCalledTimes(1);
+    expect(postedBody?.authSig).toBe("cd".repeat(64));
+  });
+});
+
 describe("MolphaGateway.execute cached context (short flow)", () => {
   it("skips the prelude fetches when a full context is supplied", async () => {
     const fetchSpy = mockFetch(() =>
