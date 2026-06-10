@@ -1,5 +1,11 @@
 # @molpha-oracle/sdk
 
+## 0.3.2
+
+### Patch Changes
+
+- 9211268: ci: verify dev snapshot pipeline increments above latest
+
 ## 0.3.1
 
 ### Patch Changes
