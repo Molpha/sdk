@@ -20,7 +20,7 @@ export function canonicalizeAPIConfig(apiConfig: APIConfig): APIConfig {
 /**
  * `apiConfigHash = keccak256(JSON.stringify(canonical apiConfig))`.
  * Pass the same config (including `{{secret.*}}` placeholders) you will send to
- * `MolphaGateway.execute` when calling `createJob`.
+ * `MolphaGateway.requestSignedData` when calling `createJob`.
  */
 export function deriveApiConfigHash(apiConfig: APIConfig): Uint8Array {
   return keccak_256(utf8(JSON.stringify(canonicalizeAPIConfig(apiConfig))));

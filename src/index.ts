@@ -8,7 +8,7 @@
 import type { Commitment, Connection } from "@solana/web3.js";
 import { PublicKey } from "@solana/web3.js";
 import type { Idl } from "@coral-xyz/anchor";
-import { type ExecuteOptions, MolphaGateway } from "./gateway/index.js";
+import { type RequestSignedDataOptions, MolphaGateway } from "./gateway/index.js";
 import { MolphaSolanaClient } from "./solana/client.js";
 import type { DataUpdateResult } from "./core/types.js";
 import { MOLPHA_IDL, MOLPHA_PROGRAM_ADDRESS } from "../idl/index.js";
@@ -56,14 +56,14 @@ export class MolphaSDK {
   }
 
   /**
-   * Run a gateway round against the current on-chain registry version and submit
-   * the signed result to the feed.
+   * Request a threshold-signed data update from the gateway (against the current
+   * on-chain registry version) and submit it to the feed.
    */
-  async executeAndSubmit(
+  async requestAndSubmit(
     jobId: string,
-    opts: Omit<ExecuteOptions, "jobId">,
+    opts: Omit<RequestSignedDataOptions, "jobId">,
   ): Promise<{ result: DataUpdateResult; signature: string }> {
-    const result = await this.gateway.execute({ jobId, ...opts });
+    const result = await this.gateway.requestSignedData({ jobId, ...opts });
     const { signature } = await this.solana.submitDataUpdate(result);
     return { result, signature };
   }
