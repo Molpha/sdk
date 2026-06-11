@@ -22,7 +22,7 @@ import type {
 import { authMessage } from "./auth.js";
 import { encryptForNodes } from "./encryption.js";
 
-export interface ExecuteOptions {
+export interface RequestSignedDataOptions {
   jobId: string;
   apiConfig: APIConfig;
   /**
@@ -40,23 +40,23 @@ export interface ExecuteOptions {
   timeoutMs?: number;
   /**
    * Pre-fetched round inputs. Any field present here skips its network/on-chain
-   * fetch, so a fully-populated context turns `execute` into a single POST round
-   * (the "short" flow). Build a reusable one with
+   * fetch, so a fully-populated context turns `requestSignedData` into a single
+   * POST round (the "short" flow). Build a reusable one with
    * {@link MolphaGateway.prepareContext}.
    *
    * Caching is opt-in because these inputs can drift: a stale `registryVersion`
    * or `nodes` set produces a result the chain will reject. Refresh the context
    * when the on-chain registry version changes.
    */
-  context?: Partial<ExecuteContext>;
+  context?: Partial<RoundContext>;
 }
 
 /**
- * The slow-changing inputs an `execute` round binds to. Fetch once with
+ * The slow-changing inputs a `requestSignedData` round binds to. Fetch once with
  * {@link MolphaGateway.prepareContext} and reuse across many rounds to skip the
  * registry/nodes/jobConfig prelude.
  */
-export interface ExecuteContext {
+export interface RoundContext {
   /** On-chain registry version the round is bound to. */
   registryVersion: number;
   /** Full node set used to derive the selection bitmap. */
@@ -65,12 +65,12 @@ export interface ExecuteContext {
   jobConfig: JobConfig;
 }
 
-interface GatewayExecuteResponse {
+interface GatewaySignedDataResponse {
   status: "completed" | "pending" | string;
-  data?: GatewayExecuteData;
+  data?: GatewaySignedData;
 }
 
-interface GatewayExecuteData {
+interface GatewaySignedData {
   jobId?: string;
   value?: string;
   valuePacked?: string;
@@ -116,7 +116,7 @@ export class MolphaGateway {
     endpoints?: string | string[],
     getRegistryVersion: () => Promise<number> = async () => {
       throw new Error(
-        "MolphaGateway requires getRegistryVersion to execute — pass the current on-chain version (e.g. () => solana.getRegistryVersion())",
+        "MolphaGateway requires getRegistryVersion to request signed data — pass the current on-chain version (e.g. () => solana.getRegistryVersion())",
       );
     },
     defaultSigner?: Signer,
@@ -157,13 +157,13 @@ export class MolphaGateway {
 
   /**
    * Fetch the slow-changing round inputs (registry version, node set, job
-   * config) once so they can be reused across many {@link execute} calls. Pass
-   * the result back via `execute({ ..., context })` to skip the prelude and run
-   * a single-round "short" flow.
+   * config) once so they can be reused across many {@link requestSignedData}
+   * calls. Pass the result back via `requestSignedData({ ..., context })` to
+   * skip the prelude and run a single-round "short" flow.
    *
    * All three fetches run in parallel.
    */
-  async prepareContext(jobId: string): Promise<ExecuteContext> {
+  async prepareContext(jobId: string): Promise<RoundContext> {
     const [registryVersion, nodes, jobConfig] = await Promise.all([
       this.getRegistryVersion(),
       this.getNodes(),
@@ -173,16 +173,16 @@ export class MolphaGateway {
   }
 
   /**
-   * Run a gateway round with retry + failover. Per attempt a fresh timestamp
-   * yields a fresh selection bitmap; the body is POSTed to each endpoint in
-   * order until one `completed`s.
+   * Request a threshold-signed data update from the gateway, with retry +
+   * failover. Per attempt a fresh timestamp yields a fresh selection bitmap; the
+   * body is POSTed to each endpoint in order until one `completed`s.
    *
    * By default this fetches the registry version, node set, and job config up
    * front (in parallel). Supply `opts.context` (e.g. from
    * {@link prepareContext}) to reuse cached inputs and skip those fetches — a
-   * fully-populated context collapses `execute` to a single POST round.
+   * fully-populated context collapses the call to a single POST round.
    */
-  async execute(opts: ExecuteOptions): Promise<DataUpdateResult> {
+  async requestSignedData(opts: RequestSignedDataOptions): Promise<DataUpdateResult> {
     const {
       jobId,
       apiConfig,
@@ -259,9 +259,9 @@ export class MolphaGateway {
             );
             continue;
           }
-          const json = (await res.json()) as GatewayExecuteResponse;
+          const json = (await res.json()) as GatewaySignedDataResponse;
           const payload = json.data ?? (
-            json.status === "completed" ? (json as unknown as GatewayExecuteData) : undefined
+            json.status === "completed" ? (json as unknown as GatewaySignedData) : undefined
           );
           if (json.status === "completed" && payload) {
             return toResult(payload, {
@@ -292,8 +292,8 @@ export class MolphaGateway {
    */
   private async resolveContext(
     jobId: string,
-    cached?: Partial<ExecuteContext>,
-  ): Promise<ExecuteContext> {
+    cached?: Partial<RoundContext>,
+  ): Promise<RoundContext> {
     const [registryVersion, nodes, jobConfig] = await Promise.all([
       cached?.registryVersion !== undefined
         ? Promise.resolve(cached.registryVersion)
@@ -414,7 +414,7 @@ async function parseGatewayErrorDetail(res: Response): Promise<string | undefine
 }
 
 function toResult(
-  data: GatewayExecuteData,
+  data: GatewaySignedData,
   ctx: {
     jobId: string;
     registryVersion: number;
