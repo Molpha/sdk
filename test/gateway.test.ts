@@ -33,7 +33,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("MolphaGateway.execute failover", () => {
+describe("MolphaGateway.requestSignedData failover", () => {
   it("returns the result when a gateway completes", async () => {
     globalThis.fetch = mockFetch(() =>
       jsonResponse({
@@ -49,7 +49,7 @@ describe("MolphaGateway.execute failover", () => {
     ) as unknown as typeof fetch;
 
     const gw = new MolphaGateway("http://gw1", async () => 1);
-    const result = await gw.execute({
+    const result = await gw.requestSignedData({
       jobId: JOB_ID,
       apiConfig: { url: "http://api", responseParser: "$.price" },
     });
@@ -74,7 +74,7 @@ describe("MolphaGateway.execute failover", () => {
     }) as unknown as typeof fetch;
 
     const gw = new MolphaGateway("http://gw1", async () => 1);
-    const result = await gw.execute({
+    const result = await gw.requestSignedData({
       jobId: JOB_ID,
       apiConfig: { url: "http://api", responseParser: "$.price" },
     });
@@ -90,7 +90,7 @@ describe("MolphaGateway.execute failover", () => {
 
     const gw = new MolphaGateway(["http://gw1", "http://gw2"], async () => 1);
     await expect(
-      gw.execute({
+      gw.requestSignedData({
         jobId: JOB_ID,
         maxRetries: 3,
         apiConfig: { url: "http://api", responseParser: "$.price" },
@@ -112,7 +112,7 @@ describe("MolphaGateway.execute failover", () => {
     globalThis.fetch = mockFetch(handler) as unknown as typeof fetch;
 
     const gw = new MolphaGateway(["http://gw1", "http://gw2"], async () => 1);
-    const result = await gw.execute({
+    const result = await gw.requestSignedData({
       jobId: JOB_ID,
       apiConfig: { url: "http://api", responseParser: "$.price" },
     });
@@ -128,7 +128,7 @@ describe("MolphaGateway.execute failover", () => {
 
     const gw = new MolphaGateway("http://gw1", async () => 1);
     await expect(
-      gw.execute({
+      gw.requestSignedData({
         jobId: JOB_ID,
         maxRetries: 1,
         apiConfig: { url: "http://api", responseParser: "$.price" },
@@ -143,7 +143,7 @@ describe("MolphaGateway.execute failover", () => {
 });
 
 describe("MolphaGateway defaultSigner", () => {
-  it("uses defaultSigner when execute omits signer", async () => {
+  it("uses defaultSigner when requestSignedData omits signer", async () => {
     const defaultSigner = vi.fn(async () => new Uint8Array(64).fill(0xab));
     let postedBody: Record<string, unknown> | undefined;
 
@@ -162,7 +162,7 @@ describe("MolphaGateway defaultSigner", () => {
     }) as unknown as typeof fetch;
 
     const gw = new MolphaGateway("http://gw1", async () => 1, defaultSigner);
-    await gw.execute({
+    await gw.requestSignedData({
       jobId: JOB_ID,
       apiConfig: { url: "http://api", responseParser: "$.price" },
     });
@@ -188,7 +188,7 @@ describe("MolphaGateway defaultSigner", () => {
     }) as unknown as typeof fetch;
 
     const gw = new MolphaGateway("http://gw1", async () => 1, defaultSigner);
-    await gw.execute({
+    await gw.requestSignedData({
       jobId: JOB_ID,
       apiConfig: { url: "http://api", responseParser: "$.price" },
       signer: overrideSigner,
@@ -200,7 +200,7 @@ describe("MolphaGateway defaultSigner", () => {
   });
 });
 
-describe("MolphaGateway.execute cached context (short flow)", () => {
+describe("MolphaGateway.requestSignedData cached context (short flow)", () => {
   it("skips the prelude fetches when a full context is supplied", async () => {
     const fetchSpy = mockFetch(() =>
       jsonResponse({ status: "completed", value: "42" }),
@@ -209,7 +209,7 @@ describe("MolphaGateway.execute cached context (short flow)", () => {
     const getRegistryVersion = vi.fn(async () => 1);
 
     const gw = new MolphaGateway("http://gw1", getRegistryVersion);
-    const result = await gw.execute({
+    const result = await gw.requestSignedData({
       jobId: JOB_ID,
       apiConfig: { url: "http://api", responseParser: "$.price" },
       context: { registryVersion: 7, nodes, jobConfig },
@@ -231,7 +231,7 @@ describe("MolphaGateway.execute cached context (short flow)", () => {
     const getRegistryVersion = vi.fn(async () => 3);
 
     const gw = new MolphaGateway("http://gw1", getRegistryVersion);
-    const result = await gw.execute({
+    const result = await gw.requestSignedData({
       jobId: JOB_ID,
       apiConfig: { url: "http://api", responseParser: "$.price" },
       // nodes cached; registryVersion + jobConfig still fetched.

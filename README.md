@@ -6,8 +6,8 @@ Use it to:
 
 - subscribe to a Molpha plan on Solana;
 - create an oracle job from an API config hash;
-- run a gateway execution round;
-- submit the threshold-signed result on-chain;
+- request a threshold-signed data update from the gateway;
+- submit the signed result on-chain;
 - verify/read the latest feed value;
 - build EVM and Starknet verifier arguments from the same signed result.
 
@@ -68,7 +68,7 @@ const sdk = new MolphaSDK({
   wallet: walletFromKeypairFile("~/.config/solana/id.json"),
 });
 
-const { result, signature } = await sdk.executeAndSubmit(jobId, {
+const { result, signature } = await sdk.requestAndSubmit(jobId, {
   apiConfig: {
     url: "https://api.example.com/price",
     responseParser: "$.price",
@@ -76,7 +76,7 @@ const { result, signature } = await sdk.executeAndSubmit(jobId, {
 });
 ```
 
-`executeAndSubmit` runs a gateway round against the current on-chain registry version, receives a threshold-signed data update, and submits it to Solana in one call.
+`requestAndSubmit` requests a threshold-signed data update from the gateway (against the current on-chain registry version) and submits it to Solana in one call.
 
 ## Configuration
 
@@ -119,7 +119,7 @@ const sdk = new MolphaSDK({
 | Layer | What it signs |
 |---|---|
 | Solana client | Transactions such as `subscribe`, `createJob`, `submitDataUpdate` (plus simulation flows such as `verifyDataUpdate`) |
-| Gateway client | `authMessage(jobId, timestamp)` for authenticated job execution |
+| Gateway client | `authMessage(jobId, timestamp)` for authenticated gateway requests |
 
 Gateway auth is resolved automatically when you use `MolphaSDK`:
 
@@ -128,11 +128,11 @@ Gateway auth is resolved automatically when you use `MolphaSDK`:
 3. Else omit auth and use an all-zero `authSig`.
 
 `MolphaSDK` passes the resolved signer to `sdk.gateway` as its default, so
-`sdk.gateway.execute({ jobId, apiConfig })` authenticates without an explicit
-`signer`. Standalone `new MolphaGateway(...)` omits auth unless you pass a
-`defaultSigner` (third constructor arg) or per-call `signer`.
+`sdk.gateway.requestSignedData({ jobId, apiConfig })` authenticates without an
+explicit `signer`. Standalone `new MolphaGateway(...)` omits auth unless you pass
+a `defaultSigner` (third constructor arg) or per-call `signer`.
 
-The all-zero `authSig` path is for development only. Production jobs should authenticate gateway execution.
+The all-zero `authSig` path is for development only. Production jobs should authenticate gateway requests.
 
 ### Node.js utility
 
@@ -155,7 +155,7 @@ const wallet: MolphaWallet = {
 };
 ```
 
-You can also override gateway auth per call with `gateway.execute({ ..., signer })` or with the same field in `executeAndSubmit`.
+You can also override gateway auth per call with `gateway.requestSignedData({ ..., signer })` or with the same field in `requestAndSubmit`.
 
 ## Core flow
 
@@ -212,10 +212,10 @@ const { jobId } = await sdk.solana.createJob({
 
 The on-chain job stores the `apiConfigHash`, not the full API config. This commits the job to a specific off-chain data source and parsing logic while keeping large config payloads and secrets off-chain.
 
-### 3. Run a gateway round
+### 3. Request signed data from the gateway
 
 ```ts
-const result = await sdk.gateway.execute({
+const result = await sdk.gateway.requestSignedData({
   jobId,
   apiConfig,
 });
@@ -244,10 +244,10 @@ Then read the finalized feed:
 const feed = await sdk.solana.readFeed(jobId);
 ```
 
-### One-call execution
+### One-call request + submit
 
 ```ts
-const { result, signature } = await sdk.executeAndSubmit(jobId, {
+const { result, signature } = await sdk.requestAndSubmit(jobId, {
   apiConfig,
 });
 ```
@@ -255,30 +255,30 @@ const { result, signature } = await sdk.executeAndSubmit(jobId, {
 This is equivalent to:
 
 ```ts
-const result = await sdk.gateway.execute({ jobId, apiConfig });
+const result = await sdk.gateway.requestSignedData({ jobId, apiConfig });
 const { signature } = await sdk.solana.submitDataUpdate(result);
 ```
 
-### Fast execution with a cached context
+### Fast requests with a cached context
 
-By default every `execute` fetches three slow-changing inputs up front (in
-parallel): the on-chain registry version, the node set, and the job config.
-When you run many rounds for the same job, fetch these once and reuse them so
-each round is a single gateway POST.
+By default every `requestSignedData` call fetches three slow-changing inputs up
+front (in parallel): the on-chain registry version, the node set, and the job
+config. When you run many rounds for the same job, fetch these once and reuse
+them so each round is a single gateway POST.
 
 ```ts
 // Fetch registryVersion + nodes + jobConfig once.
 const context = await sdk.gateway.prepareContext(jobId);
 
 // Reuse it across rounds — no prelude fetches.
-const result = await sdk.gateway.execute({ jobId, apiConfig, context });
+const result = await sdk.gateway.requestSignedData({ jobId, apiConfig, context });
 ```
 
-`context` is a `Partial<ExecuteContext>`, so you can cache only what you have
-and let `execute` fetch the rest:
+`context` is a `Partial<RoundContext>`, so you can cache only what you have
+and let `requestSignedData` fetch the rest:
 
 ```ts
-const result = await sdk.gateway.execute({
+const result = await sdk.gateway.requestSignedData({
   jobId,
   apiConfig,
   context: { nodes, jobConfig }, // registryVersion still fetched fresh
@@ -288,14 +288,14 @@ const result = await sdk.gateway.execute({
 Caching is opt-in because these inputs can drift. A stale `registryVersion` (or
 node set) yields a result the chain will reject — refresh the context when the
 on-chain registry version changes. The same `context` field is accepted by
-`executeAndSubmit`.
+`requestAndSubmit`.
 
 ## Private APIs and encrypted secrets
 
 Jobs can use private APIs without sending plaintext secrets to the gateway.
 
 ```ts
-const result = await sdk.gateway.execute({
+const result = await sdk.gateway.requestSignedData({
   jobId,
   apiConfig: {
     url: "https://api.example.com/private-price?key={{secret.apiKey}}",
@@ -311,7 +311,7 @@ const result = await sdk.gateway.execute({
 
 Secrets are encrypted into per-node envelopes. The gateway coordinates the round but should not receive plaintext API credentials.
 
-Private API execution is still an active security-sensitive surface. Do not treat encrypted secret delivery as production-ready until gateway/node-side test vectors and validation are complete.
+Private API access is still an active security-sensitive surface. Do not treat encrypted secret delivery as production-ready until gateway/node-side test vectors and validation are complete.
 
 ## EVM verification
 
@@ -347,7 +347,7 @@ const ethereum = MOLPHA_VERIFIER_EVM_SEPOLIA;
 ```ts
 import { buildEvmVerifierArgs } from "@molpha-oracle/sdk";
 
-const result = await sdk.gateway.execute({ jobId, apiConfig });
+const result = await sdk.gateway.requestSignedData({ jobId, apiConfig });
 
 const { dataUpdate, signature } = buildEvmVerifierArgs(result);
 ```
@@ -454,7 +454,7 @@ const sepoliaDirect = MOLPHA_VERIFIER_STARKNET_SEPOLIA;
 ```ts
 import { buildStarknetVerifierArgs } from "@molpha-oracle/sdk";
 
-const result = await sdk.gateway.execute({ jobId, apiConfig });
+const result = await sdk.gateway.requestSignedData({ jobId, apiConfig });
 
 const { dataUpdate, signature } = buildStarknetVerifierArgs(result);
 ```
@@ -550,7 +550,7 @@ Current scope:
 
 - Solana subscription flow;
 - Solana job creation;
-- gateway execution;
+- gateway signed-data requests;
 - Solana data update verification/submission;
 - EVM verifier argument building;
 - Starknet verifier argument building;
@@ -560,7 +560,7 @@ Known limitations:
 
 - private API envelope encryption still needs gateway/node-side test-vector validation;
 - verifier-node registration and admin tooling are intentionally outside this package;
-- production deployments should use authenticated gateway execution;
+- production deployments should use authenticated gateway requests;
 - testnet verifier addresses may change between protocol releases.
 
 Solana paths such as selection bitmap, previous-version remap, and `verify_data_update` decoding are aligned with the Molpha program version vendored in this repo.
