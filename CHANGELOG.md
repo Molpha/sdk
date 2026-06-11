@@ -1,5 +1,41 @@
 # @molpha-oracle/sdk
 
+## 0.4.0
+
+### Minor Changes
+
+- 113b5d3: add a cached-context "short" flow to `MolphaGateway.requestSignedData`
+
+  Introduce `RoundContext` (`registryVersion`, `nodes`, `jobConfig`) and a
+  `gateway.prepareContext(jobId)` helper that fetches these slow-changing round
+  inputs once. Pass them back via `requestSignedData({ ..., context })` (also
+  accepted by `requestAndSubmit`) to skip the prelude and run rounds as a single
+  gateway POST. `context` is partial, so any omitted field is still fetched. The
+  default full flow now also fetches the registry version, node set, and job
+  config in parallel.
+
+- d916cd6: rename the gateway round APIs to reflect that they request signed data
+
+  The gateway never executes anything on-chain — it returns a threshold-signed
+  data update. The methods and types are renamed accordingly:
+
+  - `MolphaGateway.execute(...)` → `MolphaGateway.requestSignedData(...)`
+  - `MolphaSDK.executeAndSubmit(...)` → `MolphaSDK.requestAndSubmit(...)`
+  - `ExecuteOptions` → `RequestSignedDataOptions`
+  - `ExecuteContext` → `RoundContext`
+
+  The gateway HTTP route (`POST /v1/jobs/{id}/execute`) is unchanged.
+
+### Patch Changes
+
+- a1c15a5: wire wallet auth into `MolphaSDK.gateway.requestSignedData`
+
+  `MolphaSDK` now passes the wallet's gateway signer to `MolphaGateway` as its
+  default, so `sdk.gateway.requestSignedData({ jobId, apiConfig })` authenticates
+  without an explicit `signer`. Per-call `signer` still overrides the default.
+  Standalone `MolphaGateway` accepts an optional third `defaultSigner` constructor
+  argument; omitting it keeps the all-zero dev `authSig` behavior.
+
 ## 0.3.2
 
 ### Patch Changes
