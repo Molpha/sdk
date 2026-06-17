@@ -1,5 +1,14 @@
 # @molpha-oracle/sdk
 
+## 0.4.1
+
+### Patch Changes
+
+- dc65759: update the default gateway endpoint to `https://gateway.molpha.io`
+
+  `DEFAULT_GATEWAY_ENDPOINT` now points at the production Molpha gateway instead of the
+  previous dev IP address.
+
 ## 0.4.0
 
 ### Minor Changes
