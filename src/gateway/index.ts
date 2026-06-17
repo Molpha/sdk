@@ -94,7 +94,7 @@ const JOB_CONFIG_RETRY_INITIAL_DELAY_MS = 250;
 const JOB_CONFIG_RETRY_MAX_DELAY_MS = 2000;
 
 /** Default gateway base URL when `endpoints` is omitted. */
-export const DEFAULT_GATEWAY_ENDPOINT = "http://188.166.222.245:8080";
+export const DEFAULT_GATEWAY_ENDPOINT = "https://gateway.molpha.io";
 
 /** Thrown for terminal gateway errors (400/401) — never retried. */
 export class GatewayError extends Error {
