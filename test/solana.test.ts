@@ -4,6 +4,7 @@ import type { DataUpdateResult } from "../src/core/types.js";
 import {
   bitmapToIndices,
   decodeVerifyReturn,
+  resolveRegistryIndexForVersion,
   type RegistryStateView,
   resolveRemainingAccounts,
 } from "../src/solana/accounts.js";
@@ -92,6 +93,21 @@ describe("resolveRemainingAccounts", () => {
     expect(() => resolveRemainingAccounts(result, baseRegistry, programId)).toThrow(
       /InvalidRegistryVersion/,
     );
+  });
+});
+
+describe("resolveRegistryIndexForVersion", () => {
+  it("uses the same previous-version RemoveSwap mapping as remaining accounts", () => {
+    const registry: RegistryStateView = {
+      ...baseRegistry,
+      lastTransitionType: { removeSwap: {} },
+      removedOldIndex: 1,
+      movedOldIndex: 2,
+    };
+
+    expect(resolveRegistryIndexForVersion(0, 4, registry)).toBe(0);
+    expect(resolveRegistryIndexForVersion(1, 4, registry)).toBe(VIRTUAL_INDEX);
+    expect(resolveRegistryIndexForVersion(2, 4, registry)).toBe(1);
   });
 });
 
