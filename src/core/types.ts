@@ -57,7 +57,7 @@ export interface SchnorrSignature {
 
 /** A completed gateway round, ready to submit on-chain. */
 export interface DataUpdateResult {
-  jobId: string;
+  feedId: string;
   /** Human-readable value. */
   value: string;
   /** 32-byte packed value, hex. */

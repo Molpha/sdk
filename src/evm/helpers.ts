@@ -64,7 +64,7 @@ export function signersBitmapToUint256(value: string): bigint {
 /** Build verifier `DataUpdate` and `SchnorrSignature` tuples from a gateway result. */
 export function buildEvmVerifierArgs(result: DataUpdateResult): EvmVerifierArgs {
   const dataUpdate: EvmDataUpdateTuple = [
-    toFixedHex(result.jobId, 32, "jobId"),
+    toFixedHex(result.feedId, 32, "feedId"),
     result.registryVersion,
     result.signaturesRequired,
     toFixedHex(result.valuePacked, 32, "valuePacked"),

@@ -18,18 +18,18 @@ const MAX_NODES = BITMAP_BYTES * 8; // 256
 const U32_MAX = 0xffff_ffff;
 
 /**
- * `seed = keccak256(keccak256("MOLPHA_SELECTION_V1") || jobId || be32(rv) || be64(ts))`.
+ * `seed = keccak256(keccak256("MOLPHA_SELECTION_V1") || feedId || be32(rv) || be64(ts))`.
  */
 export function deriveSelectionSeed(
-  jobId: Uint8Array,
+  feedId: Uint8Array,
   registryVersion: number,
   canonicalTimestamp: number | bigint,
 ): Uint8Array {
-  ensureLength(jobId, 32, "jobId");
+  ensureLength(feedId, 32, "feedId");
   return keccak_256(
     concatBytes(
       SELECTION_SEED_DOMAIN,
-      jobId,
+      feedId,
       u32be(registryVersion),
       u64be(canonicalTimestamp),
     ),
@@ -133,14 +133,14 @@ export function deriveGroupBitmap(
  * `redundancy` defaults to 0; `ts` defaults to the current unix second.
  */
 export function deriveSelectionBitmap(
-  jobId: Uint8Array,
+  feedId: Uint8Array,
   registryVersion: number,
   nodeCount: number,
   signaturesRequired: number,
   redundancy = 0,
   ts: number | bigint = Math.floor(Date.now() / 1000),
 ): Uint8Array {
-  const seed = deriveSelectionSeed(jobId, registryVersion, ts);
+  const seed = deriveSelectionSeed(feedId, registryVersion, ts);
   const size = effectiveSelectionSize(signaturesRequired, redundancy, nodeCount);
   return deriveGroupBitmap(seed, nodeCount, size);
 }

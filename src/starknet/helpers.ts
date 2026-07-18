@@ -70,7 +70,7 @@ export function signersBitmapToStarknetUint256(value: string): bigint {
 /** Build verifier `DataUpdate` and `SchnorrSignature` structs from a gateway result. */
 export function buildStarknetVerifierArgs(result: DataUpdateResult): StarknetVerifierArgs {
   const dataUpdate: StarknetDataUpdate = {
-    job_id: fixedHexToBigInt(result.jobId, 32, "jobId"),
+    job_id: fixedHexToBigInt(result.feedId, 32, "feedId"),
     registry_version: result.registryVersion,
     signatures_required: result.signaturesRequired,
     value: fixedHexToBigInt(result.valuePacked, 32, "valuePacked"),

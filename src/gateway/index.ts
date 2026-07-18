@@ -23,10 +23,10 @@ import { authMessage } from "./auth.js";
 import { encryptForNodes } from "./encryption.js";
 
 export interface RequestSignedDataOptions {
-  jobId: string;
+  feedId: string;
   apiConfig: APIConfig;
   /**
-   * Signs `authMessage(jobId, timestamp)`. Overrides the gateway's
+   * Signs `authMessage(feedId, timestamp)`. Overrides the gateway's
    * `defaultSigner` when set. When both are omitted, sends all-zero authSig
    * (dev only).
    */
@@ -71,6 +71,8 @@ interface GatewaySignedDataResponse {
 }
 
 interface GatewaySignedData {
+  feedId?: string;
+  /** Legacy gateway field; treated as `feedId` when present. */
   jobId?: string;
   value?: string;
   valuePacked?: string;
@@ -139,8 +141,8 @@ export class MolphaGateway {
     return Array.isArray(data) ? data : data.nodes;
   }
 
-  async getJobConfig(jobId: string): Promise<JobConfig> {
-    return this.firstReachableData<JobConfig>(`/v1/jobs/${jobId}/config`);
+  async getJobConfig(feedId: string): Promise<JobConfig> {
+    return this.firstReachableData<JobConfig>(`/v1/jobs/${feedId}/config`);
   }
 
   async isHealthy(): Promise<boolean> {
@@ -163,11 +165,11 @@ export class MolphaGateway {
    *
    * All three fetches run in parallel.
    */
-  async prepareContext(jobId: string): Promise<RoundContext> {
+  async prepareContext(feedId: string): Promise<RoundContext> {
     const [registryVersion, nodes, jobConfig] = await Promise.all([
       this.getRegistryVersion(),
       this.getNodes(),
-      this.getJobConfigWithRetry(jobId),
+      this.getJobConfigWithRetry(feedId),
     ]);
     return { registryVersion, nodes, jobConfig };
   }
@@ -184,7 +186,7 @@ export class MolphaGateway {
    */
   async requestSignedData(opts: RequestSignedDataOptions): Promise<DataUpdateResult> {
     const {
-      jobId,
+      feedId,
       apiConfig,
       signer,
       encrypt,
@@ -193,9 +195,9 @@ export class MolphaGateway {
       timeoutMs = 5000,
     } = opts;
 
-    const jobIdBytes = hexToBytes(jobId);
+    const feedIdBytes = hexToBytes(feedId);
     const { registryVersion, nodes, jobConfig } = await this.resolveContext(
-      jobId,
+      feedId,
       opts.context,
     );
 
@@ -205,7 +207,7 @@ export class MolphaGateway {
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       const timestamp = Math.floor(Date.now() / 1000);
 
-      const seed = deriveSelectionSeed(jobIdBytes, registryVersion, timestamp);
+      const seed = deriveSelectionSeed(feedIdBytes, registryVersion, timestamp);
       const groupSize = effectiveSelectionSize(
         jobConfig.signaturesRequired,
         jobConfig.redundancyBuffer,
@@ -217,7 +219,7 @@ export class MolphaGateway {
 
       const authSigner = signer ?? this.defaultSigner;
       const authSig = authSigner
-        ? await authSigner(authMessage(jobIdBytes, timestamp))
+        ? await authSigner(authMessage(feedIdBytes, timestamp))
         : ZERO_AUTH_SIG;
 
       const body: Record<string, unknown> = {
@@ -234,7 +236,7 @@ export class MolphaGateway {
       for (const endpoint of this.endpoints) {
         try {
           const res = await this.post(
-            `${endpoint}/v1/jobs/${jobId}/execute`,
+            `${endpoint}/v1/jobs/${feedId}/execute`,
             body,
             timeoutMs,
           );
@@ -265,7 +267,7 @@ export class MolphaGateway {
           );
           if (json.status === "completed" && payload) {
             return toResult(payload, {
-              jobId,
+              feedId,
               registryVersion,
               timestamp,
               signaturesRequired: jobConfig.signaturesRequired,
@@ -291,7 +293,7 @@ export class MolphaGateway {
    * Whatever fetching remains runs in parallel.
    */
   private async resolveContext(
-    jobId: string,
+    feedId: string,
     cached?: Partial<RoundContext>,
   ): Promise<RoundContext> {
     const [registryVersion, nodes, jobConfig] = await Promise.all([
@@ -303,7 +305,7 @@ export class MolphaGateway {
         : this.getNodes(),
       cached?.jobConfig !== undefined
         ? Promise.resolve(cached.jobConfig)
-        : this.getJobConfigWithRetry(jobId),
+        : this.getJobConfigWithRetry(feedId),
     ]);
     return { registryVersion, nodes, jobConfig };
   }
@@ -332,13 +334,13 @@ export class MolphaGateway {
     throw lastError instanceof Error ? lastError : new Error(`GET ${path} failed`);
   }
 
-  private async getJobConfigWithRetry(jobId: string): Promise<JobConfig> {
+  private async getJobConfigWithRetry(feedId: string): Promise<JobConfig> {
     let lastError: unknown;
     let delayMs = JOB_CONFIG_RETRY_INITIAL_DELAY_MS;
 
     for (let attempt = 0; attempt < JOB_CONFIG_RETRY_ATTEMPTS; attempt++) {
       try {
-        return await this.getJobConfig(jobId);
+        return await this.getJobConfig(feedId);
       } catch (err) {
         if (!(err instanceof GatewayError && err.status === 404)) {
           throw err;
@@ -357,7 +359,7 @@ export class MolphaGateway {
 
     throw lastError instanceof Error
       ? lastError
-      : new GatewayError(`GET /v1/jobs/${jobId}/config failed`, 404);
+      : new GatewayError(`GET /v1/jobs/${feedId}/config failed`, 404);
   }
 
   private async post(
@@ -416,7 +418,7 @@ async function parseGatewayErrorDetail(res: Response): Promise<string | undefine
 function toResult(
   data: GatewaySignedData,
   ctx: {
-    jobId: string;
+    feedId: string;
     registryVersion: number;
     timestamp: number;
     signaturesRequired: number;
@@ -424,7 +426,7 @@ function toResult(
   },
 ): DataUpdateResult {
   return {
-    jobId: data.jobId ?? ctx.jobId,
+    feedId: data.feedId ?? data.jobId ?? ctx.feedId,
     value: data.value ?? "",
     valuePacked: data.valuePacked ?? "",
     timestamp: data.timestamp ?? ctx.timestamp,

@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import type { DataUpdateResult } from "../src/core/types.js";
 import {
   bitmapToIndices,
-  decodeVerifyReturn,
   type RegistryStateView,
   resolveRemainingAccounts,
 } from "../src/solana/accounts.js";
@@ -15,7 +14,7 @@ const programId = new PublicKey("MoLFeTRpDZgckPjjbLwW1wB9n85bQiqboPnvw9RwoG8");
 const BITMAP_012 = "00".repeat(31) + "07";
 
 const baseResult: DataUpdateResult = {
-  jobId: "11".repeat(32),
+  feedId: "11".repeat(32),
   value: "1",
   valuePacked: "00".repeat(32),
   timestamp: 1,
@@ -92,23 +91,5 @@ describe("resolveRemainingAccounts", () => {
     expect(() => resolveRemainingAccounts(result, baseRegistry, programId)).toThrow(
       /InvalidRegistryVersion/,
     );
-  });
-});
-
-describe("decodeVerifyReturn", () => {
-  it("decodes value + timestamp from the 72-byte return payload", () => {
-    const data = new Uint8Array(72);
-    data.set(new Uint8Array(32).fill(0xab), 0);
-    const ts = new DataView(data.buffer, 32, 8);
-    ts.setBigInt64(0, 1_700_000_123n, false);
-
-    expect(decodeVerifyReturn(data)).toEqual({
-      value: "ab".repeat(32),
-      canonicalTimestamp: "1700000123",
-    });
-  });
-
-  it("rejects non-72-byte payloads", () => {
-    expect(() => decodeVerifyReturn(new Uint8Array(40))).toThrow(/size mismatch/);
   });
 });

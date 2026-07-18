@@ -1,8 +1,7 @@
 /**
  * `MolphaSolanaClient` — consumer on-chain surface only (subscribe, extend,
- * createJob, submitDataUpdate, readFeed/readPlan/readSubscription/readJob,
- * getRegistryVersion, verify). Built from
- * an Anchor `Program` over the vendored IDL.
+ * submitDataUpdate, readFeed/readPlan/readSubscription, getRegistryVersion).
+ * Built from an Anchor `Program` over the vendored IDL.
  */
 import {
   AnchorProvider,
@@ -17,19 +16,12 @@ import {
   type Connection,
   ComputeBudgetProgram,
   PublicKey,
-  Transaction,
 } from "@solana/web3.js";
-import { bytesToHex, hexToBytes, toFixedBytes } from "../core/encoding.js";
-import { deriveJobId } from "../core/ids.js";
+import { hexToBytes, toFixedBytes } from "../core/encoding.js";
 import type { DataUpdateResult } from "../core/types.js";
-import {
-  type RegistryStateView,
-  decodeVerifyReturn,
-  resolveRemainingAccounts,
-} from "./accounts.js";
+import { type RegistryStateView, resolveRemainingAccounts } from "./accounts.js";
 import {
   feedPda,
-  jobPda,
   planPda,
   protocolConfigPda,
   registryStatePda,
@@ -56,6 +48,7 @@ export interface PlanInfo {
   subscriptionPrice: bigint;
   maxJobs: number;
   maxSigners: number;
+  maxDelegates: number;
   privateApiEnabled: boolean;
   isActive: boolean;
 }
@@ -69,40 +62,25 @@ export interface SubscriptionInfo {
   price: bigint;
   /** Unix timestamp (seconds) until which the subscription is valid. */
   validUntil: bigint;
-  jobCount: number;
-}
-
-export interface JobInfo {
-  /** 32-byte job id, hex. */
-  jobId: string;
-  owner: PublicKey;
-  delegates: PublicKey[];
+  usedRounds: bigint;
+  maxRounds: bigint;
   delegateCount: number;
-  /** 32-byte API config hash, hex. */
-  apiConfigHash: string;
-  decimals: number;
-  signaturesRequired: number;
-  /** Unix timestamp (seconds) when the job was created. */
-  createdAt: bigint;
+  maxDelegates: number;
+  maxSigners: number;
 }
 
-export interface CreateJobResult {
-  signature: string;
-  /** 32-byte job id, hex. */
-  jobId: string;
-}
 export interface SubmitResult {
   signature: string;
 }
 
 export interface FeedAccount {
-  jobId: number[];
-  registryVersion: number;
-  canonicalTimestamp: BN;
+  feedId: number[];
   value: number[];
-  signersBitmap: number[];
+  valueKind: { value: Record<string, never> } | { hash: Record<string, never> };
+  canonicalTimestamp: BN;
   signaturesRequired: number;
-  lastUpdatedSlot: BN;
+  signersBitmap: number[];
+  registryVersion: number;
   bump: number;
 }
 
@@ -177,29 +155,11 @@ export class MolphaSolanaClient {
       prepaidUsdc: BigInt(account.prepaidUsdc.toString()),
       price: BigInt(account.price.toString()),
       validUntil: BigInt(account.validUntil.toString()),
-      jobCount: account.jobCount,
-    };
-  }
-
-  /** Read a job account by id, or `null` if it does not exist. */
-  async readJob(jobId: string): Promise<JobInfo | null> {
-    const account = await this.accounts.job.fetchNullable(
-      jobPda(hexToBytes(jobId), this.programId),
-    );
-    if (!account) return null;
-    const delegates: PublicKey[] = [];
-    for (let i = 0; i < account.delegateCount; i++) {
-      delegates.push(account.delegates[i]);
-    }
-    return {
-      jobId: bytesToHex(Uint8Array.from(account.jobId)),
-      owner: account.owner,
-      delegates,
+      usedRounds: BigInt(account.usedRounds.toString()),
+      maxRounds: BigInt(account.maxRounds.toString()),
       delegateCount: account.delegateCount,
-      apiConfigHash: bytesToHex(Uint8Array.from(account.apiConfigHash)),
-      decimals: account.decimals,
-      signaturesRequired: account.signaturesRequired,
-      createdAt: BigInt(account.createdAt.toString()),
+      maxDelegates: account.maxDelegates,
+      maxSigners: account.maxSigners,
     };
   }
 
@@ -295,45 +255,12 @@ export class MolphaSolanaClient {
     return price;
   }
 
-  async createJob(
-    args: { apiConfigHash: Uint8Array; signaturesRequired: number; decimals: number },
-    owner: PublicKey = this.wallet,
-  ): Promise<CreateJobResult> {
-    const apiConfigHash = toFixedBytes(args.apiConfigHash, 32, "apiConfigHash");
-    const subscription = subscriptionPda(owner, this.programId);
-    const sub = await this.accounts.subscription.fetch(subscription);
-    const planId = planIdFromVariant(sub.planType);
-
-    const jobId = deriveJobId(owner.toBytes(), apiConfigHash);
-
-    const signature = await this.methods
-      .createJob(
-        {
-          apiConfigHash: Array.from(apiConfigHash),
-          signaturesRequired: args.signaturesRequired,
-          decimals: args.decimals,
-        },
-        Array.from(jobId),
-      )
-      .accounts({
-        owner,
-        protocolConfig: protocolConfigPda(this.programId),
-        plan: planPda(planId, this.programId),
-        job: jobPda(jobId, this.programId),
-        subscription,
-        feed: feedPda(jobId, this.programId),
-        systemProgram: SYSTEM_PROGRAM_ID,
-      })
-      .rpc();
-    return { signature, jobId: bytesToHex(jobId) };
-  }
-
   async submitDataUpdate(
     result: DataUpdateResult,
     opts?: { computeUnitLimit?: number },
   ): Promise<SubmitResult> {
     const registry = await this.fetchRegistry();
-    const jobId = hexToBytes(result.jobId);
+    const feedId = hexToBytes(result.feedId);
     const remaining = resolveRemainingAccounts(result, registry, this.programId);
     const cuIx = ComputeBudgetProgram.setComputeUnitLimit({
       units: opts?.computeUnitLimit ?? DEFAULT_COMPUTE_UNIT_LIMIT,
@@ -344,7 +271,8 @@ export class MolphaSolanaClient {
       .accounts({
         submitter: this.wallet,
         registryState: registryStatePda(this.programId),
-        feed: feedPda(jobId, this.programId),
+        feed: feedPda(feedId, this.programId),
+        systemProgram: SYSTEM_PROGRAM_ID,
       })
       .remainingAccounts(remaining)
       .preInstructions([cuIx])
@@ -352,46 +280,21 @@ export class MolphaSolanaClient {
     return { signature };
   }
 
-  async readFeed(jobId: string): Promise<FeedAccount | null> {
-    const feed = feedPda(hexToBytes(jobId), this.programId);
+  async readFeed(feedId: string): Promise<FeedAccount | null> {
+    const feed = feedPda(hexToBytes(feedId), this.programId);
     return (await this.accounts.feed.fetchNullable(feed)) as FeedAccount | null;
-  }
-
-  async verifyDataUpdate(
-    result: DataUpdateResult,
-  ): Promise<{ value: string; canonicalTimestamp: string }> {
-    const registry = await this.fetchRegistry();
-    const remaining = resolveRemainingAccounts(result, registry, this.programId);
-
-    const ix = await this.methods
-      .verifyDataUpdate(this.buildSubmitArgs(result))
-      .accounts({ registryState: registryStatePda(this.programId) })
-      .remainingAccounts(remaining)
-      .instruction();
-
-    const tx = new Transaction().add(ix);
-    tx.feePayer = this.wallet;
-    const { connection } = this.provider;
-    tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
-
-    const sim = await connection.simulateTransaction(tx);
-    const ret = sim.value.returnData;
-    if (!ret) {
-      throw new Error(`verify_data_update returned no data: ${sim.value.err ?? "unknown"}`);
-    }
-    return decodeVerifyReturn(base64ToBytes(ret.data[0]));
   }
 
   private buildSubmitArgs(result: DataUpdateResult) {
     return {
-      jobId: Array.from(hexToBytes(result.jobId)),
-      signaturesRequired: result.signaturesRequired,
+      feedId: Array.from(hexToBytes(result.feedId)),
       registryVersion: result.registryVersion,
-      signersBitmap: Array.from(toFixedBytes(result.signersBitmap, 32, "signersBitmap")),
-      value: Array.from(toFixedBytes(result.valuePacked, 32, "valuePacked")),
+      value: Buffer.from(hexToBytes(result.valuePacked)),
       canonicalTimestamp: new BN(result.timestamp),
+      signaturesRequired: result.signaturesRequired,
       aggSigS: Array.from(toFixedBytes(result.s, 32, "s")),
       commitmentAddr: Array.from(toFixedBytes(result.commitmentAddr, 20, "commitmentAddr")),
+      signersBitmap: Array.from(toFixedBytes(result.signersBitmap, 32, "signersBitmap")),
     };
   }
 
@@ -400,6 +303,7 @@ export class MolphaSolanaClient {
     subscriptionPrice: { toString(): string };
     maxJobs: number;
     maxSigners: number;
+    maxDelegates: number;
     privateApiEnabled: boolean;
     isActive: boolean;
   }): PlanInfo {
@@ -408,6 +312,7 @@ export class MolphaSolanaClient {
       subscriptionPrice: BigInt(account.subscriptionPrice.toString()),
       maxJobs: account.maxJobs,
       maxSigners: account.maxSigners,
+      maxDelegates: account.maxDelegates,
       privateApiEnabled: account.privateApiEnabled,
       isActive: account.isActive,
     };
@@ -448,11 +353,4 @@ function toUsdcBaseUnits(amount: bigint | number | BN, label: string): bigint {
     return BigInt(amount);
   }
   return BigInt(amount.toString());
-}
-
-function base64ToBytes(b64: string): Uint8Array {
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
 }

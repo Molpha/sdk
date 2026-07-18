@@ -16,7 +16,7 @@ import {
 } from "../src/evm/helpers.js";
 
 const SAMPLE_RESULT: DataUpdateResult = {
-  jobId: "aa".repeat(32),
+  feedId: "aa".repeat(32),
   value: "100",
   valuePacked: "bb".repeat(32),
   timestamp: 1_700_000_000,

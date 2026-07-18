@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GatewayError, MolphaGateway } from "../src/gateway/index.js";
 
-const JOB_ID = "11".repeat(32);
+const FEED_ID = "11".repeat(32);
 
 const nodes = [
   { index: 0, peerId: "a", address: "n0", signingKey: "02".padEnd(66, "0") },
@@ -50,7 +50,7 @@ describe("MolphaGateway.requestSignedData failover", () => {
 
     const gw = new MolphaGateway("http://gw1", async () => 1);
     const result = await gw.requestSignedData({
-      jobId: JOB_ID,
+      feedId: FEED_ID,
       apiConfig: { url: "http://api", responseParser: "$.price" },
     });
     expect(result.value).toBe("100");
@@ -75,7 +75,7 @@ describe("MolphaGateway.requestSignedData failover", () => {
 
     const gw = new MolphaGateway("http://gw1", async () => 1);
     const result = await gw.requestSignedData({
-      jobId: JOB_ID,
+      feedId: FEED_ID,
       apiConfig: { url: "http://api", responseParser: "$.price" },
     });
 
@@ -91,7 +91,7 @@ describe("MolphaGateway.requestSignedData failover", () => {
     const gw = new MolphaGateway(["http://gw1", "http://gw2"], async () => 1);
     await expect(
       gw.requestSignedData({
-        jobId: JOB_ID,
+        feedId: FEED_ID,
         maxRetries: 3,
         apiConfig: { url: "http://api", responseParser: "$.price" },
       }),
@@ -113,7 +113,7 @@ describe("MolphaGateway.requestSignedData failover", () => {
 
     const gw = new MolphaGateway(["http://gw1", "http://gw2"], async () => 1);
     const result = await gw.requestSignedData({
-      jobId: JOB_ID,
+      feedId: FEED_ID,
       apiConfig: { url: "http://api", responseParser: "$.price" },
     });
     expect(result.value).toBe("7");
@@ -129,7 +129,7 @@ describe("MolphaGateway.requestSignedData failover", () => {
     const gw = new MolphaGateway("http://gw1", async () => 1);
     await expect(
       gw.requestSignedData({
-        jobId: JOB_ID,
+        feedId: FEED_ID,
         maxRetries: 1,
         apiConfig: { url: "http://api", responseParser: "$.price" },
       }),
@@ -163,7 +163,7 @@ describe("MolphaGateway defaultSigner", () => {
 
     const gw = new MolphaGateway("http://gw1", async () => 1, defaultSigner);
     await gw.requestSignedData({
-      jobId: JOB_ID,
+      feedId: FEED_ID,
       apiConfig: { url: "http://api", responseParser: "$.price" },
     });
 
@@ -189,7 +189,7 @@ describe("MolphaGateway defaultSigner", () => {
 
     const gw = new MolphaGateway("http://gw1", async () => 1, defaultSigner);
     await gw.requestSignedData({
-      jobId: JOB_ID,
+      feedId: FEED_ID,
       apiConfig: { url: "http://api", responseParser: "$.price" },
       signer: overrideSigner,
     });
@@ -210,7 +210,7 @@ describe("MolphaGateway.requestSignedData cached context (short flow)", () => {
 
     const gw = new MolphaGateway("http://gw1", getRegistryVersion);
     const result = await gw.requestSignedData({
-      jobId: JOB_ID,
+      feedId: FEED_ID,
       apiConfig: { url: "http://api", responseParser: "$.price" },
       context: { registryVersion: 7, nodes, jobConfig },
     });
@@ -220,7 +220,7 @@ describe("MolphaGateway.requestSignedData cached context (short flow)", () => {
     // No on-chain registry read, and the only fetch is the /execute POST.
     expect(getRegistryVersion).not.toHaveBeenCalled();
     const fetched = fetchSpy.mock.calls.map(([input]) => String(input));
-    expect(fetched).toEqual(["http://gw1/v1/jobs/" + JOB_ID + "/execute"]);
+    expect(fetched).toEqual(["http://gw1/v1/jobs/" + FEED_ID + "/execute"]);
   });
 
   it("fetches only the fields missing from a partial context", async () => {
@@ -232,7 +232,7 @@ describe("MolphaGateway.requestSignedData cached context (short flow)", () => {
 
     const gw = new MolphaGateway("http://gw1", getRegistryVersion);
     const result = await gw.requestSignedData({
-      jobId: JOB_ID,
+      feedId: FEED_ID,
       apiConfig: { url: "http://api", responseParser: "$.price" },
       // nodes cached; registryVersion + jobConfig still fetched.
       context: { nodes },
@@ -241,7 +241,7 @@ describe("MolphaGateway.requestSignedData cached context (short flow)", () => {
     expect(result.value).toBe("9");
     expect(getRegistryVersion).toHaveBeenCalledTimes(1);
     const fetched = fetchSpy.mock.calls.map(([input]) => String(input));
-    expect(fetched).toContain("http://gw1/v1/jobs/" + JOB_ID + "/config");
+    expect(fetched).toContain("http://gw1/v1/jobs/" + FEED_ID + "/config");
     expect(fetched).not.toContain("http://gw1/v1/nodes");
   });
 
@@ -252,7 +252,7 @@ describe("MolphaGateway.requestSignedData cached context (short flow)", () => {
     const getRegistryVersion = vi.fn(async () => 5);
 
     const gw = new MolphaGateway("http://gw1", getRegistryVersion);
-    const ctx = await gw.prepareContext(JOB_ID);
+    const ctx = await gw.prepareContext(FEED_ID);
 
     expect(ctx.registryVersion).toBe(5);
     expect(ctx.nodes).toEqual(nodes);
