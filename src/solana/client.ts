@@ -21,10 +21,15 @@ import {
 } from "@solana/web3.js";
 import { bytesToHex, hexToBytes, toFixedBytes } from "../core/encoding.js";
 import { deriveJobId } from "../core/ids.js";
-import type { DataUpdateResult } from "../core/types.js";
+import {
+  normalizeSecp256k1PublicKeyHex,
+  secp256k1PublicKeyFromCoordinates,
+} from "../core/nodeKeys.js";
+import type { DataUpdateResult, Node, NodeKeyVerifierArgs } from "../core/types.js";
 import {
   type RegistryStateView,
   decodeVerifyReturn,
+  resolveRegistryIndexForVersion,
   resolveRemainingAccounts,
 } from "./accounts.js";
 import {
@@ -32,6 +37,7 @@ import {
   jobPda,
   planPda,
   protocolConfigPda,
+  registryIndexPda,
   registryStatePda,
   subscriptionPda,
 } from "./pdas.js";
@@ -104,6 +110,13 @@ export interface FeedAccount {
   signaturesRequired: number;
   lastUpdatedSlot: BN;
   bump: number;
+}
+
+interface RegistryIndexAccount {
+  secp256k1PubkeyX?: Uint8Array | number[];
+  secp256k1PubkeyY?: Uint8Array | number[];
+  secp256k1_pubkey_x?: Uint8Array | number[];
+  secp256k1_pubkey_y?: Uint8Array | number[];
 }
 
 interface CreateClientOpts {
@@ -382,6 +395,40 @@ export class MolphaSolanaClient {
     return decodeVerifyReturn(base64ToBytes(ret.data[0]));
   }
 
+  /**
+   * Authenticate gateway-provided private API encryption keys against the
+   * on-chain registry index accounts for the round's registry version.
+   */
+  async verifyNodeKeysForPrivateApi(args: NodeKeyVerifierArgs): Promise<void> {
+    const registry = await this.fetchRegistry();
+    const selectedNodes = selectedNodesForVerifier(args);
+
+    await Promise.all(
+      selectedNodes.map(async (node) => {
+        const registryIndex = resolveRegistryIndexForVersion(
+          node.index,
+          args.registryVersion,
+          registry,
+        );
+        const account = await this.fetchRegistryIndexAccount(registryIndex, node.index);
+        const onChainKey = secp256k1PublicKeyFromCoordinates(
+          registryIndexCoordinate(account, "secp256k1PubkeyX", "secp256k1_pubkey_x"),
+          registryIndexCoordinate(account, "secp256k1PubkeyY", "secp256k1_pubkey_y"),
+          `RegistryIndex(${registryIndex}) secp256k1 public key`,
+        );
+        const gatewayKey = normalizeSecp256k1PublicKeyHex(
+          node.signingKey,
+          `Gateway selected node ${node.index} signingKey`,
+        );
+        if (gatewayKey !== onChainKey) {
+          throw new Error(
+            `Gateway selected node ${node.index} signingKey does not match on-chain RegistryIndex(${registryIndex})`,
+          );
+        }
+      }),
+    );
+  }
+
   private buildSubmitArgs(result: DataUpdateResult) {
     return {
       jobId: Array.from(hexToBytes(result.jobId)),
@@ -427,6 +474,22 @@ export class MolphaSolanaClient {
     };
   }
 
+  private async fetchRegistryIndexAccount(
+    registryIndex: number,
+    selectedNodeIndex: number,
+  ): Promise<RegistryIndexAccount> {
+    try {
+      return await this.accounts.registryIndex.fetch(
+        registryIndexPda(registryIndex, this.programId),
+      );
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `Failed to fetch on-chain RegistryIndex(${registryIndex}) for selected node ${selectedNodeIndex}: ${detail}`,
+      );
+    }
+  }
+
   private async fetchProtocolTokens(): Promise<{ usdcMint: PublicKey; treasury: PublicKey }> {
     const config = await this.accounts.protocolConfig.fetch(
       protocolConfigPda(this.programId),
@@ -455,4 +518,62 @@ function base64ToBytes(b64: string): Uint8Array {
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
+}
+
+function registryIndexCoordinate(
+  account: RegistryIndexAccount,
+  camelCaseField: "secp256k1PubkeyX" | "secp256k1PubkeyY",
+  snakeCaseField: "secp256k1_pubkey_x" | "secp256k1_pubkey_y",
+): Uint8Array {
+  const value = account[camelCaseField] ?? account[snakeCaseField];
+  if (!(value instanceof Uint8Array) && !Array.isArray(value)) {
+    throw new Error(`RegistryIndex account is missing ${camelCaseField}`);
+  }
+  return toFixedBytes(Uint8Array.from(value), 32, `RegistryIndex.${camelCaseField}`);
+}
+
+function selectedNodesForVerifier(args: NodeKeyVerifierArgs): Node[] {
+  if (args.selectedIndexes.length === 0) {
+    throw new Error("Private API node-key verification requires at least one selected index");
+  }
+  if (args.selectedNodes.length !== args.selectedIndexes.length) {
+    throw new Error(
+      `Private API node-key verification expected ${args.selectedIndexes.length} selected nodes, got ${args.selectedNodes.length}`,
+    );
+  }
+
+  const expected = new Set<number>();
+  for (const index of args.selectedIndexes) {
+    if (!Number.isInteger(index) || index < 0) {
+      throw new Error(`Private API selected index must be a non-negative integer: ${index}`);
+    }
+    if (expected.has(index)) {
+      throw new Error(`Private API selected index is duplicated: ${index}`);
+    }
+    expected.add(index);
+  }
+
+  const byIndex = new Map<number, Node>();
+  for (const node of args.selectedNodes) {
+    if (!Number.isInteger(node.index) || node.index < 0) {
+      throw new Error(
+        `Private API selected node index must be a non-negative integer: ${node.index}`,
+      );
+    }
+    if (!expected.has(node.index)) {
+      throw new Error(`Private API selected node ${node.index} was not requested`);
+    }
+    if (byIndex.has(node.index)) {
+      throw new Error(`Private API selected node index is duplicated: ${node.index}`);
+    }
+    byIndex.set(node.index, node);
+  }
+
+  return args.selectedIndexes.map((index) => {
+    const node = byIndex.get(index);
+    if (!node) {
+      throw new Error(`Private API selected node is missing for index: ${index}`);
+    }
+    return node;
+  });
 }
