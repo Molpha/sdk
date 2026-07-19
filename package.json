@@ -46,9 +46,10 @@
     "test:watch": "vitest",
     "clean": "rm -rf dist",
     "changeset": "changeset",
+    "changeset:add-empty": "changeset add --empty",
     "version-packages": "changeset version",
     "release": "pnpm build && changeset publish",
-    "release:dev": "changeset version --snapshot dev && changeset publish --no-git-tag --tag dev"
+    "release:dev": "changeset version --snapshot dev && pnpm build && changeset publish --no-git-tag --tag dev"
   },
   "dependencies": {
     "@noble/ciphers": "^1.3.0",
