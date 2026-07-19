@@ -54,6 +54,17 @@ export function u64be(value: number | bigint): Uint8Array {
   return out;
 }
 
+/** Little-endian u64 → 8 bytes. Accepts `number` or `bigint`. */
+export function u64le(value: number | bigint): Uint8Array {
+  const v = typeof value === "bigint" ? value : BigInt(value);
+  if (v < 0n || v > 0xffffffffffffffffn) {
+    throw new RangeError(`u64 out of range: ${v}`);
+  }
+  const out = new Uint8Array(8);
+  new DataView(out.buffer).setBigUint64(0, v, true);
+  return out;
+}
+
 /** Big-endian 32-byte word ← bigint (0 ≤ v < 2^256). */
 export function u256beFromBigInt(value: bigint): Uint8Array {
   if (value < 0n) throw new RangeError("u256 cannot be negative");

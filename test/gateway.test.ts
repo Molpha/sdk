@@ -2,13 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GatewayError, MolphaGateway } from "../src/gateway/index.js";
 
 const FEED_ID = "11".repeat(32);
+const SUBSCRIPTION_OWNER = "9K9FknHzW7j8a88yKTrzxKfDrxnV2QLqSR58ETAVdc8P";
 
 const nodes = [
   { index: 0, peerId: "a", address: "n0", signingKey: "02".padEnd(66, "0") },
   { index: 1, peerId: "b", address: "n1", signingKey: "03".padEnd(66, "0") },
   { index: 2, peerId: "c", address: "n2", signingKey: "02".padEnd(66, "1") },
 ];
-const jobConfig = { signaturesRequired: 1, redundancyBuffer: 0, decimals: 8 };
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -17,17 +17,23 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-/** Routes GETs to nodes/config and lets the test control each /execute POST. */
+/** Routes GETs to nodes and lets the test control each /execute POST. */
 function mockFetch(executeHandler: (url: string) => Response | Promise<Response>) {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (init?.method === "POST" && url.endsWith("/execute")) return executeHandler(url);
     if (url.endsWith("/nodes")) return jsonResponse(nodes);
-    if (url.endsWith("/config")) return jsonResponse(jobConfig);
     if (url.endsWith("/health")) return jsonResponse({ ok: true });
     throw new Error(`unexpected fetch: ${url}`);
   });
 }
+
+const baseRequest = {
+  feedId: FEED_ID,
+  signaturesRequired: 1,
+  apiConfig: { url: "http://api", responseParser: "$.price" },
+  subscriptionOwner: SUBSCRIPTION_OWNER,
+};
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -49,39 +55,20 @@ describe("MolphaGateway.requestSignedData failover", () => {
     ) as unknown as typeof fetch;
 
     const gw = new MolphaGateway("http://gw1", async () => 1);
-    const result = await gw.requestSignedData({
-      feedId: FEED_ID,
-      apiConfig: { url: "http://api", responseParser: "$.price" },
-    });
+    const result = await gw.requestSignedData(baseRequest);
     expect(result.value).toBe("100");
     expect(result.commitmentAddr).toBe("bb".repeat(20));
   });
 
-  it("retries on initial job config 404 for fresh jobs", async () => {
-    let configCalls = 0;
-    const executeHandler = vi.fn(() => jsonResponse({ status: "completed", value: "100" }));
-
-    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (init?.method === "POST" && url.endsWith("/execute")) return executeHandler();
-      if (url.endsWith("/nodes")) return jsonResponse(nodes);
-      if (url.endsWith("/config")) {
-        configCalls += 1;
-        if (configCalls < 3) return jsonResponse({ error: "not found" }, 404);
-        return jsonResponse(jobConfig);
-      }
-      throw new Error(`unexpected fetch: ${url}`);
-    }) as unknown as typeof fetch;
-
+  it("throws when subscriptionOwner is missing", async () => {
     const gw = new MolphaGateway("http://gw1", async () => 1);
-    const result = await gw.requestSignedData({
-      feedId: FEED_ID,
-      apiConfig: { url: "http://api", responseParser: "$.price" },
-    });
-
-    expect(result.value).toBe("100");
-    expect(configCalls).toBe(3);
-    expect(executeHandler).toHaveBeenCalledTimes(1);
+    await expect(
+      gw.requestSignedData({
+        feedId: FEED_ID,
+        signaturesRequired: 1,
+        apiConfig: { url: "http://api", responseParser: "$.price" },
+      }),
+    ).rejects.toThrow("subscriptionOwner is required");
   });
 
   it("throws immediately on 400 without trying the next endpoint", async () => {
@@ -91,9 +78,8 @@ describe("MolphaGateway.requestSignedData failover", () => {
     const gw = new MolphaGateway(["http://gw1", "http://gw2"], async () => 1);
     await expect(
       gw.requestSignedData({
-        feedId: FEED_ID,
+        ...baseRequest,
         maxRetries: 3,
-        apiConfig: { url: "http://api", responseParser: "$.price" },
       }),
     ).rejects.toMatchObject({
       name: "GatewayError",
@@ -112,10 +98,7 @@ describe("MolphaGateway.requestSignedData failover", () => {
     globalThis.fetch = mockFetch(handler) as unknown as typeof fetch;
 
     const gw = new MolphaGateway(["http://gw1", "http://gw2"], async () => 1);
-    const result = await gw.requestSignedData({
-      feedId: FEED_ID,
-      apiConfig: { url: "http://api", responseParser: "$.price" },
-    });
+    const result = await gw.requestSignedData(baseRequest);
     expect(result.value).toBe("7");
     expect(handler).toHaveBeenCalledTimes(2);
   });
@@ -129,9 +112,8 @@ describe("MolphaGateway.requestSignedData failover", () => {
     const gw = new MolphaGateway("http://gw1", async () => 1);
     await expect(
       gw.requestSignedData({
-        feedId: FEED_ID,
+        ...baseRequest,
         maxRetries: 1,
-        apiConfig: { url: "http://api", responseParser: "$.price" },
       }),
     ).rejects.toMatchObject({
       name: "GatewayError",
@@ -147,9 +129,6 @@ describe("MolphaGateway defaultSigner", () => {
     const defaultSigner = vi.fn(async () => new Uint8Array(64).fill(0xab));
     let postedBody: Record<string, unknown> | undefined;
 
-    globalThis.fetch = mockFetch(() => {
-      return jsonResponse({ status: "completed", value: "1" });
-    }) as unknown as typeof fetch;
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (init?.method === "POST" && url.endsWith("/execute")) {
@@ -157,18 +136,25 @@ describe("MolphaGateway defaultSigner", () => {
         return jsonResponse({ status: "completed", value: "1" });
       }
       if (url.endsWith("/nodes")) return jsonResponse(nodes);
-      if (url.endsWith("/config")) return jsonResponse(jobConfig);
       throw new Error(`unexpected fetch: ${url}`);
     }) as unknown as typeof fetch;
 
-    const gw = new MolphaGateway("http://gw1", async () => 1, defaultSigner);
+    const gw = new MolphaGateway(
+      "http://gw1",
+      async () => 1,
+      defaultSigner,
+      SUBSCRIPTION_OWNER,
+    );
     await gw.requestSignedData({
       feedId: FEED_ID,
+      signaturesRequired: 1,
       apiConfig: { url: "http://api", responseParser: "$.price" },
     });
 
     expect(defaultSigner).toHaveBeenCalledTimes(1);
-    expect(postedBody?.authSig).toBe("ab".repeat(64));
+    expect(postedBody?.authSig).toBe("0x" + "ab".repeat(64));
+    expect(postedBody?.subscriptionOwner).toBe(SUBSCRIPTION_OWNER);
+    expect(postedBody?.consumerAuthority).toBe(SUBSCRIPTION_OWNER);
   });
 
   it("prefers per-call signer over defaultSigner", async () => {
@@ -183,20 +169,25 @@ describe("MolphaGateway defaultSigner", () => {
         return jsonResponse({ status: "completed", value: "1" });
       }
       if (url.endsWith("/nodes")) return jsonResponse(nodes);
-      if (url.endsWith("/config")) return jsonResponse(jobConfig);
       throw new Error(`unexpected fetch: ${url}`);
     }) as unknown as typeof fetch;
 
-    const gw = new MolphaGateway("http://gw1", async () => 1, defaultSigner);
+    const gw = new MolphaGateway(
+      "http://gw1",
+      async () => 1,
+      defaultSigner,
+      SUBSCRIPTION_OWNER,
+    );
     await gw.requestSignedData({
       feedId: FEED_ID,
+      signaturesRequired: 1,
       apiConfig: { url: "http://api", responseParser: "$.price" },
       signer: overrideSigner,
     });
 
     expect(defaultSigner).not.toHaveBeenCalled();
     expect(overrideSigner).toHaveBeenCalledTimes(1);
-    expect(postedBody?.authSig).toBe("cd".repeat(64));
+    expect(postedBody?.authSig).toBe("0x" + "cd".repeat(64));
   });
 });
 
@@ -210,9 +201,8 @@ describe("MolphaGateway.requestSignedData cached context (short flow)", () => {
 
     const gw = new MolphaGateway("http://gw1", getRegistryVersion);
     const result = await gw.requestSignedData({
-      feedId: FEED_ID,
-      apiConfig: { url: "http://api", responseParser: "$.price" },
-      context: { registryVersion: 7, nodes, jobConfig },
+      ...baseRequest,
+      context: { registryVersion: 7, nodes },
     });
 
     expect(result.value).toBe("42");
@@ -220,7 +210,7 @@ describe("MolphaGateway.requestSignedData cached context (short flow)", () => {
     // No on-chain registry read, and the only fetch is the /execute POST.
     expect(getRegistryVersion).not.toHaveBeenCalled();
     const fetched = fetchSpy.mock.calls.map(([input]) => String(input));
-    expect(fetched).toEqual(["http://gw1/v1/jobs/" + FEED_ID + "/execute"]);
+    expect(fetched).toEqual(["http://gw1/v1/round/execute"]);
   });
 
   it("fetches only the fields missing from a partial context", async () => {
@@ -232,16 +222,14 @@ describe("MolphaGateway.requestSignedData cached context (short flow)", () => {
 
     const gw = new MolphaGateway("http://gw1", getRegistryVersion);
     const result = await gw.requestSignedData({
-      feedId: FEED_ID,
-      apiConfig: { url: "http://api", responseParser: "$.price" },
-      // nodes cached; registryVersion + jobConfig still fetched.
+      ...baseRequest,
+      // nodes cached; registryVersion still fetched.
       context: { nodes },
     });
 
     expect(result.value).toBe("9");
     expect(getRegistryVersion).toHaveBeenCalledTimes(1);
     const fetched = fetchSpy.mock.calls.map(([input]) => String(input));
-    expect(fetched).toContain("http://gw1/v1/jobs/" + FEED_ID + "/config");
     expect(fetched).not.toContain("http://gw1/v1/nodes");
   });
 
@@ -256,7 +244,6 @@ describe("MolphaGateway.requestSignedData cached context (short flow)", () => {
 
     expect(ctx.registryVersion).toBe(5);
     expect(ctx.nodes).toEqual(nodes);
-    expect(ctx.jobConfig).toEqual(jobConfig);
     expect(getRegistryVersion).toHaveBeenCalledTimes(1);
   });
 });

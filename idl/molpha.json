@@ -2711,19 +2711,6 @@
       ]
     },
     {
-      "name": "JobCreated",
-      "discriminator": [
-        48,
-        110,
-        162,
-        177,
-        67,
-        74,
-        159,
-        131
-      ]
-    },
-    {
       "name": "NodeDeactivated",
       "discriminator": [
         74,
@@ -3057,196 +3044,186 @@
     },
     {
       "code": 6027,
-      "name": "DelegateJobLimitReached",
-      "msg": "delegate jobs_created >= max_jobs_created"
-    },
-    {
-      "code": 6028,
       "name": "DelegateDataRequestLimitReached",
       "msg": "delegate data_requests_used >= max_data_requests"
     },
     {
-      "code": 6029,
+      "code": 6028,
       "name": "DelegateNotFound",
       "msg": "remove_delegate target not found"
     },
     {
-      "code": 6030,
+      "code": 6029,
       "name": "DelegateNotActive",
       "msg": "delegate is paused"
     },
     {
-      "code": 6031,
+      "code": 6030,
       "name": "SignaturesExceedDelegateMax",
       "msg": "signatures_required exceeds delegate.max_signers"
     },
     {
-      "code": 6032,
+      "code": 6031,
       "name": "DelegateCapReached",
       "msg": "subscription delegate_count >= plan.max_delegates"
     },
     {
-      "code": 6033,
-      "name": "UnauthorisedJobOwner",
-      "msg": "job.owner does not match signer"
-    },
-    {
-      "code": 6034,
+      "code": 6032,
       "name": "InvalidRegistrationSalt",
       "msg": "registration_salt must not be zero"
     },
     {
-      "code": 6035,
+      "code": 6033,
       "name": "InvalidSecp256k1KeyFingerprint",
       "msg": "secp256k1 key fingerprint does not match compressed key"
     },
     {
-      "code": 6036,
+      "code": 6034,
       "name": "InsufficientSigners",
       "msg": "popcount(signers_bitmap) < signatures_required"
     },
     {
-      "code": 6037,
+      "code": 6035,
       "name": "SignaturesExceedSubscriptionMax",
       "msg": "signatures_required exceeds subscription.max_signers"
     },
     {
-      "code": 6038,
+      "code": 6036,
       "name": "SignersNotSubsetOfSelection",
       "msg": "Signer bits outside selection bitmap"
     },
     {
-      "code": 6039,
+      "code": 6037,
       "name": "InvalidAggregateSignature",
       "msg": "PoP-Schnorr aggregate verification failed"
     },
     {
-      "code": 6040,
+      "code": 6038,
       "name": "FeedNotNewer",
       "msg": "canonical_timestamp <= feed.canonical_timestamp"
     },
     {
-      "code": 6041,
+      "code": 6039,
       "name": "MissingSignerAccount",
       "msg": "Missing or mis-ordered signer slot version account"
     },
     {
-      "code": 6042,
+      "code": 6040,
       "name": "SubscriptionNotActive",
       "msg": "subscription has expired"
     },
     {
-      "code": 6043,
+      "code": 6041,
       "name": "ConsumerSigInvalid",
       "msg": "consumer Ed25519 signature missing or invalid"
     },
     {
-      "code": 6044,
+      "code": 6042,
       "name": "QuorumBelowThreshold",
       "msg": "popcount(signers_bitmap) < signatures_required"
     },
     {
-      "code": 6045,
+      "code": 6043,
       "name": "GatewayNotBonded",
       "msg": "gateway not registered or bonded below gateway_bond_min"
     },
     {
-      "code": 6046,
+      "code": 6044,
       "name": "SubscriptionInactiveOrExhausted",
       "msg": "subscription inactive or round quota exhausted"
     },
     {
-      "code": 6047,
+      "code": 6045,
       "name": "DisputeAggSigMismatch",
       "msg": "supplied signature does not match committed agg_sig_hash"
     },
     {
-      "code": 6048,
+      "code": 6046,
       "name": "DisputeSignatureValid",
       "msg": "dispute failed: the committed signature verifies (no fraud)"
     },
     {
-      "code": 6049,
+      "code": 6047,
       "name": "GatewayIndexMismatch",
       "msg": "gateway_index does not match the bonded gateway"
     },
     {
-      "code": 6050,
+      "code": 6048,
       "name": "InsufficientBond",
       "msg": "bond amount below gateway_bond_min"
     },
     {
-      "code": 6051,
+      "code": 6049,
       "name": "CreditedBitmapMismatch",
       "msg": "agg_sig.signers_bitmap does not match signers_bitmap"
     },
     {
-      "code": 6052,
+      "code": 6050,
       "name": "RoundNotFinalizable",
       "msg": "round still inside dispute window; cannot finalize"
     },
     {
-      "code": 6053,
+      "code": 6051,
       "name": "RoundNotPending",
       "msg": "round is not pending"
     },
     {
-      "code": 6054,
+      "code": 6052,
       "name": "NothingToClaim",
       "msg": "no claimable rewards"
     },
     {
-      "code": 6055,
+      "code": 6053,
       "name": "InvalidInstructionsSysvar",
       "msg": "instructions sysvar account is invalid"
     },
     {
-      "code": 6056,
+      "code": 6054,
       "name": "UnauthorisedConsumer",
-      "msg": "consumer authority is not the job owner or a delegate"
+      "msg": "consumer authority is not the delegate authority"
     },
     {
-      "code": 6057,
+      "code": 6055,
       "name": "InvalidCreditNodeAccount",
       "msg": "mismatched or missing credited node account"
     },
     {
-      "code": 6058,
+      "code": 6056,
       "name": "AgentNotActive",
       "msg": "agent escrow is not active"
     },
     {
-      "code": 6059,
+      "code": 6057,
       "name": "AmountMismatch",
       "msg": "computed price does not match the agent-signed amount"
     },
     {
-      "code": 6060,
+      "code": 6058,
       "name": "EpochCapExceeded",
       "msg": "arithmetic overflow in escrow spend accounting"
     },
     {
-      "code": 6061,
+      "code": 6059,
       "name": "InsufficientAgentCredits",
       "msg": "escrow ATA balance below computed price"
     },
     {
-      "code": 6062,
+      "code": 6060,
       "name": "AgentSigInvalid",
       "msg": "agent request authorization signature is invalid or missing"
     },
     {
-      "code": 6063,
+      "code": 6061,
       "name": "InvalidAgentCaps",
       "msg": "agent cap parameters invalid"
     },
     {
-      "code": 6064,
+      "code": 6062,
       "name": "CreditedExceedsSelection",
       "msg": "credited signer count exceeds signatures_required + redundancy_buffer"
     },
     {
-      "code": 6065,
+      "code": 6063,
       "name": "InvalidValueLength",
       "msg": "value exceeds Feed::MAX_VALUE_LEN"
     }
@@ -3260,10 +3237,6 @@
           {
             "name": "delegate",
             "type": "pubkey"
-          },
-          {
-            "name": "max_jobs_created",
-            "type": "u32"
           },
           {
             "name": "max_data_requests",
@@ -3292,10 +3265,6 @@
           {
             "name": "subscription_price",
             "type": "u64"
-          },
-          {
-            "name": "max_jobs",
-            "type": "u32"
           },
           {
             "name": "max_signers",
@@ -3502,7 +3471,7 @@
     {
       "name": "Delegate",
       "docs": [
-        "Owner-scoped delegate authorization with persistent job/request quotas."
+        "Owner-scoped delegate authorization with persistent request quotas."
       ],
       "type": {
         "kind": "struct",
@@ -3525,14 +3494,6 @@
                 "name": "AgentStatus"
               }
             }
-          },
-          {
-            "name": "max_jobs_created",
-            "type": "u32"
-          },
-          {
-            "name": "jobs_created",
-            "type": "u32"
           },
           {
             "name": "max_data_requests",
@@ -3591,10 +3552,6 @@
             "type": "pubkey"
           },
           {
-            "name": "max_jobs_created",
-            "type": "u32"
-          },
-          {
             "name": "max_data_requests",
             "type": "u64"
           },
@@ -3624,10 +3581,6 @@
           {
             "name": "delegate",
             "type": "pubkey"
-          },
-          {
-            "name": "jobs_created",
-            "type": "u32"
           },
           {
             "name": "data_requests_used",
@@ -3982,39 +3935,6 @@
       }
     },
     {
-      "name": "JobCreated",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "feed_id",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          },
-          {
-            "name": "owner",
-            "type": "pubkey"
-          },
-          {
-            "name": "plan_type",
-            "type": "u8"
-          },
-          {
-            "name": "signatures_required",
-            "type": "u8"
-          },
-          {
-            "name": "created_at",
-            "type": "i64"
-          }
-        ]
-      }
-    },
-    {
       "name": "Node",
       "docs": [
         "Slot-keyed registry entry and the single account touched by the round workflows.",
@@ -4291,10 +4211,6 @@
             "type": "u64"
           },
           {
-            "name": "max_jobs",
-            "type": "u32"
-          },
-          {
             "name": "max_signers",
             "type": "u8"
           },
@@ -4332,10 +4248,6 @@
           {
             "name": "subscription_price",
             "type": "u64"
-          },
-          {
-            "name": "max_jobs",
-            "type": "u32"
           },
           {
             "name": "max_signers",
@@ -4391,10 +4303,6 @@
           {
             "name": "subscription_price",
             "type": "u64"
-          },
-          {
-            "name": "max_jobs",
-            "type": "u32"
           },
           {
             "name": "max_signers",
@@ -5544,10 +5452,6 @@
           {
             "name": "subscription_price",
             "type": "u64"
-          },
-          {
-            "name": "max_jobs",
-            "type": "u32"
           },
           {
             "name": "max_signers",

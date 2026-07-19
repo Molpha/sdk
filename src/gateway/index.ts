@@ -3,6 +3,7 @@
  */
 import {
   bytesToHex,
+  bytesToHex0x,
   hexToBytes,
 } from "../core/encoding.js";
 import { canonicalizeAPIConfig } from "../core/apiconfig.js";
@@ -15,7 +16,6 @@ import {
 import type {
   APIConfig,
   DataUpdateResult,
-  JobConfig,
   Node,
   Signer,
 } from "../core/types.js";
@@ -24,7 +24,18 @@ import { encryptForNodes } from "./encryption.js";
 
 export interface RequestSignedDataOptions {
   feedId: string;
+  signaturesRequired: number;
   apiConfig: APIConfig;
+  /**
+   * Solana pubkey (base58) of the subscription owner.
+   * Overrides the gateway's `defaultSubscriptionOwner` when set.
+   */
+  subscriptionOwner?: string;
+  /**
+   * Solana pubkey (base58) of the consumer authority that signs gateway auth.
+   * Overrides the gateway's `defaultConsumerAuthority` when set.
+   */
+  consumerAuthority?: string;
   /**
    * Signs `authMessage(feedId, timestamp)`. Overrides the gateway's
    * `defaultSigner` when set. When both are omitted, sends all-zero authSig
@@ -53,16 +64,13 @@ export interface RequestSignedDataOptions {
 
 /**
  * The slow-changing inputs a `requestSignedData` round binds to. Fetch once with
- * {@link MolphaGateway.prepareContext} and reuse across many rounds to skip the
- * registry/nodes/jobConfig prelude.
+ * {@link MolphaGateway.prepareContext} and reuse across many rounds
  */
 export interface RoundContext {
   /** On-chain registry version the round is bound to. */
   registryVersion: number;
   /** Full node set used to derive the selection bitmap. */
   nodes: Node[];
-  /** Per-job quorum configuration. */
-  jobConfig: JobConfig;
 }
 
 interface GatewaySignedDataResponse {
@@ -72,8 +80,6 @@ interface GatewaySignedDataResponse {
 
 interface GatewaySignedData {
   feedId?: string;
-  /** Legacy gateway field; treated as `feedId` when present. */
-  jobId?: string;
   value?: string;
   valuePacked?: string;
   timestamp?: number;
@@ -91,12 +97,10 @@ interface GatewayEnvelope<T> {
 }
 
 const ZERO_AUTH_SIG = new Uint8Array(64);
-const JOB_CONFIG_RETRY_ATTEMPTS = 10;
-const JOB_CONFIG_RETRY_INITIAL_DELAY_MS = 250;
-const JOB_CONFIG_RETRY_MAX_DELAY_MS = 2000;
 
 /** Default gateway base URL when `endpoints` is omitted. */
-export const DEFAULT_GATEWAY_ENDPOINT = "https://gateway.molpha.io";
+export const DEFAULT_GATEWAY_ENDPOINT = "http://152.42.193.251:8080";
+export const REDUNDANCY_BUFFER = 2;
 
 /** Thrown for terminal gateway errors (400/401) — never retried. */
 export class GatewayError extends Error {
@@ -113,6 +117,8 @@ export class MolphaGateway {
   private readonly endpoints: string[];
   private readonly getRegistryVersion: () => Promise<number>;
   private readonly defaultSigner?: Signer;
+  private readonly defaultSubscriptionOwner?: string;
+  private readonly defaultConsumerAuthority?: string;
 
   constructor(
     endpoints?: string | string[],
@@ -122,6 +128,8 @@ export class MolphaGateway {
       );
     },
     defaultSigner?: Signer,
+    defaultSubscriptionOwner?: string,
+    defaultConsumerAuthority?: string,
   ) {
     const list =
       endpoints === undefined
@@ -133,16 +141,14 @@ export class MolphaGateway {
     this.endpoints = list.map((e) => e.replace(/\/$/, ""));
     this.getRegistryVersion = getRegistryVersion;
     this.defaultSigner = defaultSigner;
+    this.defaultSubscriptionOwner = defaultSubscriptionOwner;
+    this.defaultConsumerAuthority = defaultConsumerAuthority ?? defaultSubscriptionOwner;
   }
 
   /** Tries endpoints in order; returns the first node list it can fetch. */
   async getNodes(): Promise<Node[]> {
     const data = await this.firstReachableData<{ nodes: Node[] } | Node[]>("/v1/nodes");
     return Array.isArray(data) ? data : data.nodes;
-  }
-
-  async getJobConfig(feedId: string): Promise<JobConfig> {
-    return this.firstReachableData<JobConfig>(`/v1/jobs/${feedId}/config`);
   }
 
   async isHealthy(): Promise<boolean> {
@@ -158,7 +164,7 @@ export class MolphaGateway {
   }
 
   /**
-   * Fetch the slow-changing round inputs (registry version, node set, job
+   * Fetch the slow-changing round inputs (registry version, node set, feed
    * config) once so they can be reused across many {@link requestSignedData}
    * calls. Pass the result back via `requestSignedData({ ..., context })` to
    * skip the prelude and run a single-round "short" flow.
@@ -166,12 +172,11 @@ export class MolphaGateway {
    * All three fetches run in parallel.
    */
   async prepareContext(feedId: string): Promise<RoundContext> {
-    const [registryVersion, nodes, jobConfig] = await Promise.all([
+    const [registryVersion, nodes] = await Promise.all([
       this.getRegistryVersion(),
       this.getNodes(),
-      this.getJobConfigWithRetry(feedId),
     ]);
-    return { registryVersion, nodes, jobConfig };
+    return { registryVersion, nodes };
   }
 
   /**
@@ -179,10 +184,10 @@ export class MolphaGateway {
    * failover. Per attempt a fresh timestamp yields a fresh selection bitmap; the
    * body is POSTed to each endpoint in order until one `completed`s.
    *
-   * By default this fetches the registry version, node set, and job config up
-   * front (in parallel). Supply `opts.context` (e.g. from
-   * {@link prepareContext}) to reuse cached inputs and skip those fetches — a
-   * fully-populated context collapses the call to a single POST round.
+   * By default this fetches the registry version and node set up front (in parallel).
+   * Supply `opts.context` (e.g. from {@link prepareContext}) to reuse cached inputs
+   * and skip those fetches — a fully-populated context collapses the call to a
+   * single POST round.
    */
   async requestSignedData(opts: RequestSignedDataOptions): Promise<DataUpdateResult> {
     const {
@@ -196,12 +201,20 @@ export class MolphaGateway {
     } = opts;
 
     const feedIdBytes = hexToBytes(feedId);
-    const { registryVersion, nodes, jobConfig } = await this.resolveContext(
+    const { registryVersion, nodes } = await this.resolveContext(
       feedId,
       opts.context,
     );
 
     const requestApiConfig = canonicalizeAPIConfig(apiConfig);
+    const subscriptionOwner = opts.subscriptionOwner ?? this.defaultSubscriptionOwner;
+    if (!subscriptionOwner) {
+      throw new Error(
+        "subscriptionOwner is required — pass opts.subscriptionOwner or set MolphaGateway defaultSubscriptionOwner (MolphaSDK sets this from wallet.publicKey)",
+      );
+    }
+    const consumerAuthority =
+      opts.consumerAuthority ?? this.defaultConsumerAuthority ?? subscriptionOwner;
 
     let lastError: unknown;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -209,8 +222,8 @@ export class MolphaGateway {
 
       const seed = deriveSelectionSeed(feedIdBytes, registryVersion, timestamp);
       const groupSize = effectiveSelectionSize(
-        jobConfig.signaturesRequired,
-        jobConfig.redundancyBuffer,
+        opts.signaturesRequired,
+        REDUNDANCY_BUFFER,
         nodes.length,
       );
       const bitmap = deriveGroupBitmap(seed, nodes.length, groupSize);
@@ -223,10 +236,14 @@ export class MolphaGateway {
         : ZERO_AUTH_SIG;
 
       const body: Record<string, unknown> = {
+        feedId,
         registryVersion,
         timestamp,
         maxAge,
-        authSig: bytesToHex(authSig),
+        signaturesRequired: opts.signaturesRequired,
+        subscriptionOwner,
+        consumerAuthority,
+        authSig: bytesToHex0x(authSig),
         apiConfig: requestApiConfig,
       };
       if (encrypt) {
@@ -236,7 +253,7 @@ export class MolphaGateway {
       for (const endpoint of this.endpoints) {
         try {
           const res = await this.post(
-            `${endpoint}/v1/jobs/${feedId}/execute`,
+            `${endpoint}/v1/round/execute`,
             body,
             timeoutMs,
           );
@@ -270,7 +287,7 @@ export class MolphaGateway {
               feedId,
               registryVersion,
               timestamp,
-              signaturesRequired: jobConfig.signaturesRequired,
+              signaturesRequired: opts.signaturesRequired,
               bitmap,
             });
           }
@@ -296,18 +313,15 @@ export class MolphaGateway {
     feedId: string,
     cached?: Partial<RoundContext>,
   ): Promise<RoundContext> {
-    const [registryVersion, nodes, jobConfig] = await Promise.all([
+    const [registryVersion, nodes] = await Promise.all([
       cached?.registryVersion !== undefined
         ? Promise.resolve(cached.registryVersion)
         : this.getRegistryVersion(),
       cached?.nodes !== undefined
         ? Promise.resolve(cached.nodes)
         : this.getNodes(),
-      cached?.jobConfig !== undefined
-        ? Promise.resolve(cached.jobConfig)
-        : this.getJobConfigWithRetry(feedId),
     ]);
-    return { registryVersion, nodes, jobConfig };
+    return { registryVersion, nodes };
   }
 
   private async firstReachableData<T>(path: string): Promise<T> {
@@ -332,34 +346,6 @@ export class MolphaGateway {
       }
     }
     throw lastError instanceof Error ? lastError : new Error(`GET ${path} failed`);
-  }
-
-  private async getJobConfigWithRetry(feedId: string): Promise<JobConfig> {
-    let lastError: unknown;
-    let delayMs = JOB_CONFIG_RETRY_INITIAL_DELAY_MS;
-
-    for (let attempt = 0; attempt < JOB_CONFIG_RETRY_ATTEMPTS; attempt++) {
-      try {
-        return await this.getJobConfig(feedId);
-      } catch (err) {
-        if (!(err instanceof GatewayError && err.status === 404)) {
-          throw err;
-        }
-        lastError = err;
-      }
-
-      if (attempt < JOB_CONFIG_RETRY_ATTEMPTS - 1) {
-        await sleep(delayMs);
-        delayMs = Math.min(
-          Math.floor(delayMs * 1.5),
-          JOB_CONFIG_RETRY_MAX_DELAY_MS,
-        );
-      }
-    }
-
-    throw lastError instanceof Error
-      ? lastError
-      : new GatewayError(`GET /v1/jobs/${feedId}/config failed`, 404);
   }
 
   private async post(
@@ -426,7 +412,7 @@ function toResult(
   },
 ): DataUpdateResult {
   return {
-    feedId: data.feedId ?? data.jobId ?? ctx.feedId,
+    feedId: data.feedId ?? ctx.feedId,
     value: data.value ?? "",
     valuePacked: data.valuePacked ?? "",
     timestamp: data.timestamp ?? ctx.timestamp,

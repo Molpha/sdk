@@ -7,7 +7,7 @@ import type { DataUpdateResult } from "../core/types.js";
 
 /** Starknet calldata shape for `DataUpdate`. */
 export interface StarknetDataUpdate {
-  job_id: bigint;
+  feed_id: bigint;
   registry_version: number;
   signatures_required: number;
   value: bigint;
@@ -70,7 +70,7 @@ export function signersBitmapToStarknetUint256(value: string): bigint {
 /** Build verifier `DataUpdate` and `SchnorrSignature` structs from a gateway result. */
 export function buildStarknetVerifierArgs(result: DataUpdateResult): StarknetVerifierArgs {
   const dataUpdate: StarknetDataUpdate = {
-    job_id: fixedHexToBigInt(result.feedId, 32, "feedId"),
+    feed_id: fixedHexToBigInt(result.feedId, 32, "feedId"),
     registry_version: result.registryVersion,
     signatures_required: result.signaturesRequired,
     value: fixedHexToBigInt(result.valuePacked, 32, "valuePacked"),

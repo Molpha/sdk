@@ -6,9 +6,10 @@ import {
   type RegistryStateView,
   resolveRemainingAccounts,
 } from "../src/solana/accounts.js";
-import { registryIndexPda, VIRTUAL_INDEX } from "../src/solana/pdas.js";
+import { MOLPHA_PROGRAM_ADDRESS } from "../idl/index.js";
+import { nodePda, VIRTUAL_INDEX } from "../src/solana/pdas.js";
 
-const programId = new PublicKey("MoLFeTRpDZgckPjjbLwW1wB9n85bQiqboPnvw9RwoG8");
+const programId = new PublicKey(MOLPHA_PROGRAM_ADDRESS);
 
 /** bits 0,1,2 set in the 32-byte big-endian word. */
 const BITMAP_012 = "00".repeat(31) + "07";
@@ -36,7 +37,7 @@ const baseRegistry: RegistryStateView = {
 };
 
 const keys = (metas: { pubkey: PublicKey }[]) => metas.map((m) => m.pubkey.toBase58());
-const pda = (i: number) => registryIndexPda(i, programId).toBase58();
+const pda = (i: number) => nodePda(i, programId).toBase58();
 
 describe("bitmapToIndices", () => {
   it("reads set bits from a 32-byte big-endian word", () => {

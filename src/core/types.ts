@@ -12,14 +12,7 @@ export interface Node {
   signingKey: string;
 }
 
-/** Per-job quorum configuration as returned by the gateway. */
-export interface JobConfig {
-  signaturesRequired: number;
-  redundancyBuffer: number;
-  decimals: number;
-}
-
-/** The off-chain API definition a job resolves. */
+/** The off-chain API definition a feed resolves. */
 export interface APIConfig {
   url: string;
   method?: "GET" | "POST" | "PUT";

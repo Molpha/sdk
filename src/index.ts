@@ -52,6 +52,7 @@ export class MolphaSDK {
       opts.endpoints,
       () => this.solana.getRegistryVersion(),
       gatewaySignerFromWallet(opts.wallet),
+      opts.wallet.publicKey.toBase58(),
     );
   }
 

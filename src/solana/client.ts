@@ -46,7 +46,6 @@ export interface PlanInfo {
   planType: PlanType;
   /** Subscription price in USDC base units (raw u64, e.g. 1_000_000 = 1 USDC at 6 decimals). */
   subscriptionPrice: bigint;
-  maxJobs: number;
   maxSigners: number;
   maxDelegates: number;
   privateApiEnabled: boolean;
@@ -301,7 +300,6 @@ export class MolphaSolanaClient {
   private decodePlan(account: {
     planType: Record<string, unknown>;
     subscriptionPrice: { toString(): string };
-    maxJobs: number;
     maxSigners: number;
     maxDelegates: number;
     privateApiEnabled: boolean;
@@ -310,7 +308,6 @@ export class MolphaSolanaClient {
     return {
       planType: planIdFromVariant(account.planType) as unknown as PlanType,
       subscriptionPrice: BigInt(account.subscriptionPrice.toString()),
-      maxJobs: account.maxJobs,
       maxSigners: account.maxSigners,
       maxDelegates: account.maxDelegates,
       privateApiEnabled: account.privateApiEnabled,

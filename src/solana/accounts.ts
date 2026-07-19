@@ -6,7 +6,7 @@ import { type AccountMeta, PublicKey } from "@solana/web3.js";
 import { hexToBytes } from "../core/encoding.js";
 import { selectedIndices } from "../core/selection.js";
 import type { DataUpdateResult } from "../core/types.js";
-import { registryIndexPda, VIRTUAL_INDEX } from "./pdas.js";
+import { nodePda, VIRTUAL_INDEX } from "./pdas.js";
 
 /** The subset of on-chain `RegistryState` the client needs (Anchor camelCase). */
 export interface RegistryStateView {
@@ -40,7 +40,7 @@ export function resolveRemainingAccounts(
 
   const mapIndex = mapIndexFn(result.registryVersion, registry);
   return bits.map((bit) => ({
-    pubkey: registryIndexPda(mapIndex(bit), programId),
+    pubkey: nodePda(mapIndex(bit), programId),
     isSigner: false,
     isWritable: false,
   }));

@@ -319,28 +319,16 @@ After a gateway round, the same signed result can be verified on EVM chains.
 
 The SDK ships deployed testnet verifier addresses and framework-agnostic tuple builders. It does not depend on ethers or viem at runtime.
 
-### Deployed verifier addresses
+### Deployed verifier address
+
+The verifier is deployed with CREATE2 so the contract address is the same on every
+supported EVM chain.
 
 ```ts
-import {
-  MOLPHA_VERIFIER_ADDRESSES,
-  MOLPHA_VERIFIER_EVM_SEPOLIA,
-  getMolphaVerifierAddress,
-} from "@molpha-oracle/sdk";
+import { MOLPHA_VERIFIER_ADDRESS } from "@molpha-oracle/sdk";
 
-const address = getMolphaVerifierAddress("evm-sepolia");
-
-// or:
-const arbitrum = MOLPHA_VERIFIER_ADDRESSES["arbitrum-sepolia"];
-const ethereum = MOLPHA_VERIFIER_EVM_SEPOLIA;
+const address = MOLPHA_VERIFIER_ADDRESS;
 ```
-
-| Network | Constant |
-|---|---|
-| Ethereum Sepolia | `MOLPHA_VERIFIER_EVM_SEPOLIA` |
-| Arbitrum Sepolia | `MOLPHA_VERIFIER_ARBITRUM_SEPOLIA` |
-| Avalanche Fuji | `MOLPHA_VERIFIER_AVALANCHE_FUJI` |
-| BSC testnet | `MOLPHA_VERIFIER_BSC_TESTNET` |
 
 ### Build verifier arguments
 
@@ -374,11 +362,11 @@ The generated tuples match the Molpha EVM verifier ABI:
 import { Contract } from "ethers";
 import {
   buildEvmVerifierArgs,
-  getMolphaVerifierAddress,
+  MOLPHA_VERIFIER_ADDRESS,
 } from "@molpha-oracle/sdk";
 
 const verifier = new Contract(
-  getMolphaVerifierAddress("evm-sepolia"),
+  MOLPHA_VERIFIER_ADDRESS,
   abi,
   signer,
 );
@@ -394,7 +382,7 @@ await verifier.verify(dataUpdate, signature);
 import { createPublicClient, http } from "viem";
 import {
   buildEvmVerifierArgs,
-  MOLPHA_VERIFIER_EVM_SEPOLIA,
+  MOLPHA_VERIFIER_ADDRESS,
 } from "@molpha-oracle/sdk";
 
 const client = createPublicClient({
@@ -405,7 +393,7 @@ const client = createPublicClient({
 const { dataUpdate, signature } = buildEvmVerifierArgs(result);
 
 await client.readContract({
-  address: MOLPHA_VERIFIER_EVM_SEPOLIA,
+  address: MOLPHA_VERIFIER_ADDRESS,
   abi,
   functionName: "verify",
   args: [dataUpdate, signature],
