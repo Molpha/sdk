@@ -1,8 +1,8 @@
 /**
  * `MolphaSolanaClient` — consumer on-chain surface only (subscribe, extend,
- * submitDataUpdate, readFeed/readPlan/readSubscription, getRegistryVersion,
- * verifyNodeKeysForPrivateApi). Built from an Anchor `Program` over the
- * vendored IDL.
+ * submitDataUpdate, readFeed/readPlan/readSubscription,
+ * getRegistrySelectionConfig, verifyNodeKeysForPrivateApi). Built from an
+ * Anchor `Program` over the vendored IDL.
  */
 import {
   AnchorProvider,
@@ -23,7 +23,7 @@ import {
   normalizeSecp256k1PublicKeyHex,
   secp256k1PublicKeyFromCoordinates,
 } from "../core/nodeKeys.js";
-import type { DataUpdateResult, Node, NodeKeyVerifierArgs } from "../core/types.js";
+import type { DataUpdateResult, Node, NodeKeyVerifierArgs, RegistrySelectionConfig } from "../core/types.js";
 import {
   type RegistryStateView,
   resolveRegistryIndexForVersion,
@@ -139,9 +139,22 @@ export class MolphaSolanaClient {
     return this.program.account;
   }
 
-  async getRegistryVersion(): Promise<number> {
+  /**
+   * Current registry version and selection `redundancy_buffer` from a single
+   * `RegistryState` account read. Prefer this over {@link getRegistryVersion}
+   * when deriving gateway selection bitmaps.
+   */
+  async getRegistrySelectionConfig(): Promise<RegistrySelectionConfig> {
     const registry = await this.fetchRegistry();
-    return registry.currentVersion;
+    return {
+      registryVersion: registry.currentVersion,
+      redundancyBuffer: registry.redundancyBuffer,
+    };
+  }
+
+  async getRegistryVersion(): Promise<number> {
+    const { registryVersion } = await this.getRegistrySelectionConfig();
+    return registryVersion;
   }
 
   /** Fetch a plan's on-chain terms, including the USDC `subscriptionPrice` charged on `subscribe`. */
@@ -374,6 +387,7 @@ export class MolphaSolanaClient {
       currentVersion: registry.currentVersion,
       previousVersion: registry.previousVersion,
       previousExpiresAt: BigInt(registry.previousExpiresAt.toString()),
+      redundancyBuffer: registry.redundancyBuffer,
       lastTransitionType: registry.lastTransitionType,
       removedOldIndex: registry.removedOldIndex,
       movedOldIndex: registry.movedOldIndex,

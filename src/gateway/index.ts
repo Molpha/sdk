@@ -19,10 +19,13 @@ import type {
   DataUpdateResult,
   Node,
   NodeKeyVerifier,
+  RegistrySelectionConfig,
   Signer,
 } from "../core/types.js";
 import { authMessage } from "./auth.js";
 import { encryptForNodes } from "./encryption.js";
+
+export type { RegistrySelectionConfig } from "../core/types.js";
 
 export interface RequestSignedDataOptions {
   feedId: string;
@@ -57,9 +60,9 @@ export interface RequestSignedDataOptions {
    * POST round (the "short" flow). Build a reusable one with
    * {@link MolphaGateway.prepareContext}.
    *
-   * Caching is opt-in because these inputs can drift: a stale `registryVersion`
-   * or `nodes` set produces a result the chain will reject. Refresh the context
-   * when the on-chain registry version changes.
+   * Caching is opt-in because these inputs can drift: a stale `registryVersion`,
+   * `redundancyBuffer`, or `nodes` set produces a result the chain will reject.
+   * Refresh the context when the on-chain registry version changes.
    */
   context?: Partial<RoundContext>;
   /**
@@ -96,9 +99,7 @@ export interface MolphaGatewayOptions {
  * The slow-changing inputs a `requestSignedData` round binds to. Fetch once with
  * {@link MolphaGateway.prepareContext} and reuse across many rounds
  */
-export interface RoundContext {
-  /** On-chain registry version the round is bound to. */
-  registryVersion: number;
+export interface RoundContext extends RegistrySelectionConfig {
   /** Full node set used to derive the selection bitmap. */
   nodes: Node[];
 }
@@ -129,8 +130,7 @@ interface GatewayEnvelope<T> {
 const ZERO_AUTH_SIG = new Uint8Array(64);
 
 /** Default gateway base URL when `endpoints` is omitted. */
-export const DEFAULT_GATEWAY_ENDPOINT = "http://152.42.193.251:8080";
-export const REDUNDANCY_BUFFER = 2;
+export const DEFAULT_GATEWAY_ENDPOINT = "https://brebeneskul.gateway.molpha.io/";
 
 /** Thrown for terminal gateway errors (400/401) — never retried. */
 export class GatewayError extends Error {
@@ -145,7 +145,7 @@ export class GatewayError extends Error {
 
 export class MolphaGateway {
   private readonly endpoints: string[];
-  private readonly getRegistryVersion: () => Promise<number>;
+  private readonly getRegistrySelectionConfig: () => Promise<RegistrySelectionConfig>;
   private readonly defaultSigner?: Signer;
   private readonly defaultSubscriptionOwner?: string;
   private readonly defaultConsumerAuthority?: string;
@@ -154,9 +154,9 @@ export class MolphaGateway {
 
   constructor(
     endpoints?: string | string[],
-    getRegistryVersion: () => Promise<number> = async () => {
+    getRegistrySelectionConfig: () => Promise<RegistrySelectionConfig> = async () => {
       throw new Error(
-        "MolphaGateway requires getRegistryVersion to request signed data — pass the current on-chain version (e.g. () => solana.getRegistryVersion())",
+        "MolphaGateway requires getRegistrySelectionConfig to request signed data — pass the current on-chain registry version and redundancy buffer (e.g. () => solana.getRegistrySelectionConfig())",
       );
     },
     defaultSigner?: Signer,
@@ -175,7 +175,7 @@ export class MolphaGateway {
           : [endpoints];
     if (list.length === 0) throw new Error("At least one endpoint is required");
     this.endpoints = list.map((e) => e.replace(/\/$/, ""));
-    this.getRegistryVersion = getRegistryVersion;
+    this.getRegistrySelectionConfig = getRegistrySelectionConfig;
     this.defaultSigner = defaultSigner;
 
     const options: MolphaGatewayOptions =
@@ -213,19 +213,20 @@ export class MolphaGateway {
   }
 
   /**
-   * Fetch the slow-changing round inputs (registry version, node set) once so
-   * they can be reused across many {@link requestSignedData} calls. Pass the
-   * result back via `requestSignedData({ ..., context })` to skip the prelude
-   * and run a single-round "short" flow.
+   * Fetch the slow-changing round inputs (registry version, redundancy buffer,
+   * node set) once so they can be reused across many {@link requestSignedData}
+   * calls. Pass the result back via `requestSignedData({ ..., context })` to
+   * skip the prelude and run a single-round "short" flow.
    *
-   * Both fetches run in parallel.
+   * Both fetches run in parallel. Registry version and redundancy buffer come
+   * from a single on-chain `RegistryState` read.
    */
   async prepareContext(_feedId: string): Promise<RoundContext> {
-    const [registryVersion, nodes] = await Promise.all([
-      this.getRegistryVersion(),
+    const [registry, nodes] = await Promise.all([
+      this.getRegistrySelectionConfig(),
       this.getNodes(),
     ]);
-    return { registryVersion, nodes };
+    return { ...registry, nodes };
   }
 
   /**
@@ -233,10 +234,10 @@ export class MolphaGateway {
    * failover. Per attempt a fresh timestamp yields a fresh selection bitmap; the
    * body is POSTed to each endpoint in order until one `completed`s.
    *
-   * By default this fetches the registry version and node set up front (in parallel).
-   * Supply `opts.context` (e.g. from {@link prepareContext}) to reuse cached inputs
-   * and skip those fetches — a fully-populated context collapses the call to a
-   * single POST round.
+   * By default this fetches the registry selection config and node set up front
+   * (in parallel). Supply `opts.context` (e.g. from {@link prepareContext}) to
+   * reuse cached inputs and skip those fetches — a fully-populated context
+   * collapses the call to a single POST round.
    */
   async requestSignedData(opts: RequestSignedDataOptions): Promise<DataUpdateResult> {
     const {
@@ -260,7 +261,7 @@ export class MolphaGateway {
     }
 
     const feedIdBytes = hexToBytes(feedId);
-    const { registryVersion, nodes } = await this.resolveContext(
+    const { registryVersion, redundancyBuffer, nodes } = await this.resolveContext(
       feedId,
       opts.context,
     );
@@ -282,7 +283,7 @@ export class MolphaGateway {
       const seed = deriveSelectionSeed(feedIdBytes, registryVersion, timestamp);
       const groupSize = effectiveSelectionSize(
         opts.signaturesRequired,
-        REDUNDANCY_BUFFER,
+        redundancyBuffer,
         nodes.length,
       );
       const bitmap = deriveGroupBitmap(seed, nodes.length, groupSize);
@@ -380,21 +381,27 @@ export class MolphaGateway {
 
   /**
    * Resolve the round inputs, fetching only the fields absent from `cached`.
-   * Whatever fetching remains runs in parallel.
+   * Registry version and redundancy buffer are treated as a unit (one account
+   * read). Whatever fetching remains runs in parallel.
    */
   private async resolveContext(
     _feedId: string,
     cached?: Partial<RoundContext>,
   ): Promise<RoundContext> {
-    const [registryVersion, nodes] = await Promise.all([
-      cached?.registryVersion !== undefined
-        ? Promise.resolve(cached.registryVersion)
-        : this.getRegistryVersion(),
+    const hasRegistry =
+      cached?.registryVersion !== undefined && cached?.redundancyBuffer !== undefined;
+    const [registry, nodes] = await Promise.all([
+      hasRegistry
+        ? Promise.resolve({
+            registryVersion: cached.registryVersion!,
+            redundancyBuffer: cached.redundancyBuffer!,
+          })
+        : this.getRegistrySelectionConfig(),
       cached?.nodes !== undefined
         ? Promise.resolve(cached.nodes)
         : this.getNodes(),
     ]);
-    return { registryVersion, nodes };
+    return { ...registry, nodes };
   }
 
   private async firstReachableData<T>(path: string): Promise<T> {

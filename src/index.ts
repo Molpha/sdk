@@ -50,7 +50,7 @@ export class MolphaSDK {
     });
     this.gateway = new MolphaGateway(
       opts.endpoints,
-      () => this.solana.getRegistryVersion(),
+      () => this.solana.getRegistrySelectionConfig(),
       gatewaySignerFromWallet(opts.wallet),
       {
         defaultSubscriptionOwner: opts.wallet.publicKey.toBase58(),

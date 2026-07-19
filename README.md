@@ -261,17 +261,17 @@ const { signature } = await sdk.solana.submitDataUpdate(result);
 
 ### Fast requests with a cached context
 
-By default every `requestSignedData` call fetches three slow-changing inputs up
-front (in parallel): the on-chain registry version, the node set, and the job
-config. When you run many rounds for the same job, fetch these once and reuse
-them so each round is a single gateway POST.
+By default every `requestSignedData` call fetches slow-changing inputs up
+front (in parallel): the on-chain registry version and redundancy buffer (one
+account read), and the node set. When you run many rounds for the same feed,
+fetch these once and reuse them so each round is a single gateway POST.
 
 ```ts
-// Fetch registryVersion + nodes + jobConfig once.
-const context = await sdk.gateway.prepareContext(jobId);
+// Fetch registryVersion + redundancyBuffer + nodes once.
+const context = await sdk.gateway.prepareContext(feedId);
 
 // Reuse it across rounds — no prelude fetches.
-const result = await sdk.gateway.requestSignedData({ jobId, apiConfig, context });
+const result = await sdk.gateway.requestSignedData({ feedId, apiConfig, context });
 ```
 
 `context` is a `Partial<RoundContext>`, so you can cache only what you have
@@ -279,16 +279,16 @@ and let `requestSignedData` fetch the rest:
 
 ```ts
 const result = await sdk.gateway.requestSignedData({
-  jobId,
+  feedId,
   apiConfig,
-  context: { nodes, jobConfig }, // registryVersion still fetched fresh
+  context: { nodes }, // registryVersion + redundancyBuffer still fetched fresh
 });
 ```
 
-Caching is opt-in because these inputs can drift. A stale `registryVersion` (or
-node set) yields a result the chain will reject — refresh the context when the
-on-chain registry version changes. The same `context` field is accepted by
-`requestAndSubmit`.
+Caching is opt-in because these inputs can drift. A stale `registryVersion`,
+`redundancyBuffer`, or node set yields a result the chain will reject — refresh
+the context when the on-chain registry changes. The same `context` field is
+accepted by `requestAndSubmit`.
 
 ## Private APIs and encrypted secrets
 
@@ -524,11 +524,11 @@ const solana = MolphaSolanaClient.create({
 
 const gateway = new MolphaGateway(
   endpoints,
-  () => solana.getRegistryVersion(),
+  () => solana.getRegistrySelectionConfig(),
 );
 ```
 
-The facade wires the registry version resolver automatically.
+The facade wires the registry selection config resolver automatically.
 
 ## Status
 

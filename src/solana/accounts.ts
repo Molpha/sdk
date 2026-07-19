@@ -13,6 +13,8 @@ export interface RegistryStateView {
   currentVersion: number;
   previousVersion: number;
   previousExpiresAt: bigint;
+  /** On-chain selection padding: `signatures_required + redundancy_buffer`. */
+  redundancyBuffer: number;
   lastTransitionType:
     | { none: Record<string, never> }
     | { add: Record<string, never> }

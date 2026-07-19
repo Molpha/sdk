@@ -67,14 +67,14 @@ describe("MolphaGateway.requestSignedData failover", () => {
       }),
     ) as unknown as typeof fetch;
 
-    const gw = new MolphaGateway("http://gw1", async () => 1);
+    const gw = new MolphaGateway("http://gw1", async () => ({ registryVersion: 1, redundancyBuffer: 2 }));
     const result = await gw.requestSignedData(baseRequest);
     expect(result.value).toBe("100");
     expect(result.commitmentAddr).toBe("bb".repeat(20));
   });
 
   it("throws when subscriptionOwner is missing", async () => {
-    const gw = new MolphaGateway("http://gw1", async () => 1);
+    const gw = new MolphaGateway("http://gw1", async () => ({ registryVersion: 1, redundancyBuffer: 2 }));
     await expect(
       gw.requestSignedData({
         feedId: FEED_ID,
@@ -88,7 +88,7 @@ describe("MolphaGateway.requestSignedData failover", () => {
     const handler = vi.fn(() => jsonResponse({ error: "bad" }, 400));
     globalThis.fetch = mockFetch(handler) as unknown as typeof fetch;
 
-    const gw = new MolphaGateway(["http://gw1", "http://gw2"], async () => 1);
+    const gw = new MolphaGateway(["http://gw1", "http://gw2"], async () => ({ registryVersion: 1, redundancyBuffer: 2 }));
     await expect(
       gw.requestSignedData({
         ...baseRequest,
@@ -110,7 +110,7 @@ describe("MolphaGateway.requestSignedData failover", () => {
     );
     globalThis.fetch = mockFetch(handler) as unknown as typeof fetch;
 
-    const gw = new MolphaGateway(["http://gw1", "http://gw2"], async () => 1);
+    const gw = new MolphaGateway(["http://gw1", "http://gw2"], async () => ({ registryVersion: 1, redundancyBuffer: 2 }));
     const result = await gw.requestSignedData(baseRequest);
     expect(result.value).toBe("7");
     expect(handler).toHaveBeenCalledTimes(2);
@@ -122,7 +122,7 @@ describe("MolphaGateway.requestSignedData failover", () => {
     );
     globalThis.fetch = mockFetch(handler) as unknown as typeof fetch;
 
-    const gw = new MolphaGateway("http://gw1", async () => 1);
+    const gw = new MolphaGateway("http://gw1", async () => ({ registryVersion: 1, redundancyBuffer: 2 }));
     await expect(
       gw.requestSignedData({
         ...baseRequest,
@@ -154,7 +154,7 @@ describe("MolphaGateway defaultSigner", () => {
 
     const gw = new MolphaGateway(
       "http://gw1",
-      async () => 1,
+      async () => ({ registryVersion: 1, redundancyBuffer: 2 }),
       defaultSigner,
       SUBSCRIPTION_OWNER,
     );
@@ -187,7 +187,7 @@ describe("MolphaGateway defaultSigner", () => {
 
     const gw = new MolphaGateway(
       "http://gw1",
-      async () => 1,
+      async () => ({ registryVersion: 1, redundancyBuffer: 2 }),
       defaultSigner,
       SUBSCRIPTION_OWNER,
     );
@@ -210,18 +210,18 @@ describe("MolphaGateway.requestSignedData cached context (short flow)", () => {
       jsonResponse({ status: "completed", value: "42" }),
     );
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
-    const getRegistryVersion = vi.fn(async () => 1);
+    const getRegistrySelectionConfig = vi.fn(async () => ({ registryVersion: 1, redundancyBuffer: 2 }));
 
-    const gw = new MolphaGateway("http://gw1", getRegistryVersion);
+    const gw = new MolphaGateway("http://gw1", getRegistrySelectionConfig);
     const result = await gw.requestSignedData({
       ...baseRequest,
-      context: { registryVersion: 7, nodes },
+      context: { registryVersion: 7, redundancyBuffer: 2, nodes },
     });
 
     expect(result.value).toBe("42");
     expect(result.registryVersion).toBe(7);
     // No on-chain registry read, and the only fetch is the /execute POST.
-    expect(getRegistryVersion).not.toHaveBeenCalled();
+    expect(getRegistrySelectionConfig).not.toHaveBeenCalled();
     const fetched = fetchSpy.mock.calls.map(([input]) => String(input));
     expect(fetched).toEqual(["http://gw1/v1/round/execute"]);
   });
@@ -231,17 +231,17 @@ describe("MolphaGateway.requestSignedData cached context (short flow)", () => {
       jsonResponse({ status: "completed", value: "9" }),
     );
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
-    const getRegistryVersion = vi.fn(async () => 3);
+    const getRegistrySelectionConfig = vi.fn(async () => ({ registryVersion: 3, redundancyBuffer: 2 }));
 
-    const gw = new MolphaGateway("http://gw1", getRegistryVersion);
+    const gw = new MolphaGateway("http://gw1", getRegistrySelectionConfig);
     const result = await gw.requestSignedData({
       ...baseRequest,
-      // nodes cached; registryVersion still fetched.
+      // nodes cached; registry selection config still fetched.
       context: { nodes },
     });
 
     expect(result.value).toBe("9");
-    expect(getRegistryVersion).toHaveBeenCalledTimes(1);
+    expect(getRegistrySelectionConfig).toHaveBeenCalledTimes(1);
     const fetched = fetchSpy.mock.calls.map(([input]) => String(input));
     expect(fetched).not.toContain("http://gw1/v1/nodes");
   });
@@ -250,14 +250,50 @@ describe("MolphaGateway.requestSignedData cached context (short flow)", () => {
     globalThis.fetch = mockFetch(() =>
       jsonResponse({ status: "completed", value: "1" }),
     ) as unknown as typeof fetch;
-    const getRegistryVersion = vi.fn(async () => 5);
+    const getRegistrySelectionConfig = vi.fn(async () => ({ registryVersion: 5, redundancyBuffer: 2 }));
 
-    const gw = new MolphaGateway("http://gw1", getRegistryVersion);
+    const gw = new MolphaGateway("http://gw1", getRegistrySelectionConfig);
     const ctx = await gw.prepareContext(FEED_ID);
 
     expect(ctx.registryVersion).toBe(5);
+    expect(ctx.redundancyBuffer).toBe(2);
     expect(ctx.nodes).toEqual(nodes);
-    expect(getRegistryVersion).toHaveBeenCalledTimes(1);
+    expect(getRegistrySelectionConfig).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the cached redundancyBuffer for selection size", async () => {
+    const verifyNodeKeys = vi.fn(async (_args: unknown) => undefined);
+    globalThis.fetch = mockFetch(() =>
+      jsonResponse({ status: "completed", value: "1" }),
+    ) as unknown as typeof fetch;
+    const getRegistrySelectionConfig = vi.fn(async () => ({
+      registryVersion: 1,
+      redundancyBuffer: 2,
+    }));
+
+    const gw = new MolphaGateway("http://gw1", getRegistrySelectionConfig, undefined, {
+      verifyNodeKeys,
+      defaultSubscriptionOwner: SUBSCRIPTION_OWNER,
+    });
+    await gw.requestSignedData({
+      feedId: FEED_ID,
+      signaturesRequired: 1,
+      apiConfig: privateApiConfig,
+      encrypt: privateApiEncrypt,
+      context: {
+        registryVersion: 1,
+        // On-chain buffer lowered to 0 — select only signaturesRequired nodes.
+        redundancyBuffer: 0,
+        nodes: encryptedNodes,
+      },
+    });
+
+    expect(getRegistrySelectionConfig).not.toHaveBeenCalled();
+    expect(verifyNodeKeys.mock.calls[0]?.[0]).toMatchObject({
+      selectedIndexes: expect.any(Array),
+    });
+    expect((verifyNodeKeys.mock.calls[0]?.[0] as { selectedIndexes: number[] }).selectedIndexes)
+      .toHaveLength(1);
   });
 });
 
@@ -265,9 +301,9 @@ describe("MolphaGateway.requestSignedData private API encryption node key verifi
   it("throws by default when encrypt.secrets is used without a verifier", async () => {
     const fetchSpy = vi.fn();
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
-    const getRegistryVersion = vi.fn(async () => 1);
+    const getRegistrySelectionConfig = vi.fn(async () => ({ registryVersion: 1, redundancyBuffer: 2 }));
 
-    const gw = new MolphaGateway("http://gw1", getRegistryVersion);
+    const gw = new MolphaGateway("http://gw1", getRegistrySelectionConfig);
     await expect(
       gw.requestSignedData({
         feedId: FEED_ID,
@@ -276,7 +312,7 @@ describe("MolphaGateway.requestSignedData private API encryption node key verifi
         encrypt: privateApiEncrypt,
       }),
     ).rejects.toThrow(/requires authenticated node keys/);
-    expect(getRegistryVersion).not.toHaveBeenCalled();
+    expect(getRegistrySelectionConfig).not.toHaveBeenCalled();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -287,7 +323,7 @@ describe("MolphaGateway.requestSignedData private API encryption node key verifi
       return jsonResponse({ status: "completed", value: "1" });
     }) as unknown as typeof fetch;
 
-    const gw = new MolphaGateway("http://gw1", async () => 1, undefined, {
+    const gw = new MolphaGateway("http://gw1", async () => ({ registryVersion: 1, redundancyBuffer: 2 }), undefined, {
       allowUnverifiedNodeKeysForPrivateApi: true,
       defaultSubscriptionOwner: SUBSCRIPTION_OWNER,
     });
@@ -298,6 +334,7 @@ describe("MolphaGateway.requestSignedData private API encryption node key verifi
       encrypt: privateApiEncrypt,
       context: {
         registryVersion: 1,
+        redundancyBuffer: 2,
         nodes: [encryptedNodes[0]!],
       },
     });
@@ -315,7 +352,7 @@ describe("MolphaGateway.requestSignedData private API encryption node key verifi
       return jsonResponse({ status: "completed", value: "1" });
     }) as unknown as typeof fetch;
 
-    const gw = new MolphaGateway("http://gw1", async () => 1, undefined, {
+    const gw = new MolphaGateway("http://gw1", async () => ({ registryVersion: 1, redundancyBuffer: 2 }), undefined, {
       verifyNodeKeys,
       defaultSubscriptionOwner: SUBSCRIPTION_OWNER,
     });
@@ -326,6 +363,7 @@ describe("MolphaGateway.requestSignedData private API encryption node key verifi
       encrypt: privateApiEncrypt,
       context: {
         registryVersion: 1,
+        redundancyBuffer: 2,
         nodes: encryptedNodes,
       },
     });
@@ -353,7 +391,7 @@ describe("MolphaGateway.requestSignedData private API encryption node key verifi
       throw new Error("node key mismatch");
     });
 
-    const gw = new MolphaGateway("http://gw1", async () => 1, undefined, {
+    const gw = new MolphaGateway("http://gw1", async () => ({ registryVersion: 1, redundancyBuffer: 2 }), undefined, {
       verifyNodeKeys,
       defaultSubscriptionOwner: SUBSCRIPTION_OWNER,
     });
@@ -365,6 +403,7 @@ describe("MolphaGateway.requestSignedData private API encryption node key verifi
         encrypt: privateApiEncrypt,
         context: {
           registryVersion: 1,
+          redundancyBuffer: 2,
           nodes: [encryptedNodes[0]!],
         },
       }),
@@ -380,7 +419,7 @@ describe("MolphaGateway.requestSignedData private API encryption node key verifi
       { ...encryptedNodes[1]!, index: 0 },
     ];
 
-    const gw = new MolphaGateway("http://gw1", async () => 1, undefined, {
+    const gw = new MolphaGateway("http://gw1", async () => ({ registryVersion: 1, redundancyBuffer: 2 }), undefined, {
       allowUnverifiedNodeKeysForPrivateApi: true,
       defaultSubscriptionOwner: SUBSCRIPTION_OWNER,
     });
@@ -392,6 +431,7 @@ describe("MolphaGateway.requestSignedData private API encryption node key verifi
         encrypt: privateApiEncrypt,
         context: {
           registryVersion: 1,
+          redundancyBuffer: 2,
           nodes: duplicateNodes,
         },
       }),
@@ -407,7 +447,7 @@ describe("MolphaGateway.requestSignedData private API encryption node key verifi
       { ...encryptedNodes[1]!, signingKey: encryptedNodes[0]!.signingKey },
     ];
 
-    const gw = new MolphaGateway("http://gw1", async () => 1, undefined, {
+    const gw = new MolphaGateway("http://gw1", async () => ({ registryVersion: 1, redundancyBuffer: 2 }), undefined, {
       allowUnverifiedNodeKeysForPrivateApi: true,
       defaultSubscriptionOwner: SUBSCRIPTION_OWNER,
     });
@@ -419,6 +459,7 @@ describe("MolphaGateway.requestSignedData private API encryption node key verifi
         encrypt: privateApiEncrypt,
         context: {
           registryVersion: 1,
+          redundancyBuffer: 2,
           nodes: duplicateKeyNodes,
         },
       }),
@@ -431,7 +472,7 @@ describe("MolphaGateway.requestSignedData private API encryption node key verifi
     globalThis.fetch = fetchSpy as unknown as typeof fetch;
     const invalidNodes = [{ ...encryptedNodes[0]!, signingKey: "02".padEnd(66, "0") }];
 
-    const gw = new MolphaGateway("http://gw1", async () => 1, undefined, {
+    const gw = new MolphaGateway("http://gw1", async () => ({ registryVersion: 1, redundancyBuffer: 2 }), undefined, {
       allowUnverifiedNodeKeysForPrivateApi: true,
       defaultSubscriptionOwner: SUBSCRIPTION_OWNER,
     });
@@ -443,6 +484,7 @@ describe("MolphaGateway.requestSignedData private API encryption node key verifi
         encrypt: privateApiEncrypt,
         context: {
           registryVersion: 1,
+          redundancyBuffer: 2,
           nodes: invalidNodes,
         },
       }),

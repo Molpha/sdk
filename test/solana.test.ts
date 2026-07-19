@@ -32,6 +32,7 @@ const baseRegistry: RegistryStateView = {
   currentVersion: 5,
   previousVersion: 4,
   previousExpiresAt: 9_999_999_999n,
+  redundancyBuffer: 2,
   lastTransitionType: { none: {} },
   removedOldIndex: 0xffffffff,
   movedOldIndex: 0xffffffff,

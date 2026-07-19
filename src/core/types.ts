@@ -56,6 +56,16 @@ export interface EncKeyBundle {
 export type Signer = (message: Uint8Array) => Promise<Uint8Array>;
 
 /**
+ * On-chain registry fields a gateway selection round is bound to. Fetched from
+ * `RegistryState` (`current_version`, `redundancy_buffer`).
+ */
+export interface RegistrySelectionConfig {
+  registryVersion: number;
+  /** Selection padding: `min(signaturesRequired + redundancyBuffer, nodeCount)`. */
+  redundancyBuffer: number;
+}
+
+/**
  * Aggregate Schnorr signature in the commitment-address form the shipped program
  * verifies (`MOLPHA_MESSAGE_V1`). The legacy `(rx, ryParity)` fields are gone.
  */
