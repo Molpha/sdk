@@ -1,8 +1,8 @@
 /**
  * `MolphaSolanaClient` — consumer on-chain surface only (subscribe, extend,
- * createJob, submitDataUpdate, readFeed/readPlan/readSubscription/readJob,
- * getRegistryVersion, verify). Built from
- * an Anchor `Program` over the vendored IDL.
+ * submitDataUpdate, readFeed/readPlan/readSubscription,
+ * getRegistrySelectionConfig, verifyNodeKeysForPrivateApi). Built from an
+ * Anchor `Program` over the vendored IDL.
  */
 import {
   AnchorProvider,
@@ -17,27 +17,23 @@ import {
   type Connection,
   ComputeBudgetProgram,
   PublicKey,
-  Transaction,
 } from "@solana/web3.js";
-import { bytesToHex, hexToBytes, toFixedBytes } from "../core/encoding.js";
-import { deriveJobId } from "../core/ids.js";
+import { hexToBytes, toFixedBytes } from "../core/encoding.js";
 import {
   normalizeSecp256k1PublicKeyHex,
   secp256k1PublicKeyFromCoordinates,
 } from "../core/nodeKeys.js";
-import type { DataUpdateResult, Node, NodeKeyVerifierArgs } from "../core/types.js";
+import type { DataUpdateResult, Node, NodeKeyVerifierArgs, RegistrySelectionConfig } from "../core/types.js";
 import {
   type RegistryStateView,
-  decodeVerifyReturn,
   resolveRegistryIndexForVersion,
   resolveRemainingAccounts,
 } from "./accounts.js";
 import {
   feedPda,
-  jobPda,
+  nodePda,
   planPda,
   protocolConfigPda,
-  registryIndexPda,
   registryStatePda,
   subscriptionPda,
 } from "./pdas.js";
@@ -60,8 +56,8 @@ export interface PlanInfo {
   planType: PlanType;
   /** Subscription price in USDC base units (raw u64, e.g. 1_000_000 = 1 USDC at 6 decimals). */
   subscriptionPrice: bigint;
-  maxJobs: number;
   maxSigners: number;
+  maxDelegates: number;
   privateApiEnabled: boolean;
   isActive: boolean;
 }
@@ -75,44 +71,29 @@ export interface SubscriptionInfo {
   price: bigint;
   /** Unix timestamp (seconds) until which the subscription is valid. */
   validUntil: bigint;
-  jobCount: number;
-}
-
-export interface JobInfo {
-  /** 32-byte job id, hex. */
-  jobId: string;
-  owner: PublicKey;
-  delegates: PublicKey[];
+  usedRounds: bigint;
+  maxRounds: bigint;
   delegateCount: number;
-  /** 32-byte API config hash, hex. */
-  apiConfigHash: string;
-  decimals: number;
-  signaturesRequired: number;
-  /** Unix timestamp (seconds) when the job was created. */
-  createdAt: bigint;
+  maxDelegates: number;
+  maxSigners: number;
 }
 
-export interface CreateJobResult {
-  signature: string;
-  /** 32-byte job id, hex. */
-  jobId: string;
-}
 export interface SubmitResult {
   signature: string;
 }
 
 export interface FeedAccount {
-  jobId: number[];
-  registryVersion: number;
-  canonicalTimestamp: BN;
+  feedId: number[];
   value: number[];
-  signersBitmap: number[];
+  valueKind: { value: Record<string, never> } | { hash: Record<string, never> };
+  canonicalTimestamp: BN;
   signaturesRequired: number;
-  lastUpdatedSlot: BN;
+  signersBitmap: number[];
+  registryVersion: number;
   bump: number;
 }
 
-interface RegistryIndexAccount {
+interface NodeAccount {
   secp256k1PubkeyX?: Uint8Array | number[];
   secp256k1PubkeyY?: Uint8Array | number[];
   secp256k1_pubkey_x?: Uint8Array | number[];
@@ -158,9 +139,22 @@ export class MolphaSolanaClient {
     return this.program.account;
   }
 
-  async getRegistryVersion(): Promise<number> {
+  /**
+   * Current registry version and selection `redundancy_buffer` from a single
+   * `RegistryState` account read. Prefer this over {@link getRegistryVersion}
+   * when deriving gateway selection bitmaps.
+   */
+  async getRegistrySelectionConfig(): Promise<RegistrySelectionConfig> {
     const registry = await this.fetchRegistry();
-    return registry.currentVersion;
+    return {
+      registryVersion: registry.currentVersion,
+      redundancyBuffer: registry.redundancyBuffer,
+    };
+  }
+
+  async getRegistryVersion(): Promise<number> {
+    const { registryVersion } = await this.getRegistrySelectionConfig();
+    return registryVersion;
   }
 
   /** Fetch a plan's on-chain terms, including the USDC `subscriptionPrice` charged on `subscribe`. */
@@ -190,29 +184,11 @@ export class MolphaSolanaClient {
       prepaidUsdc: BigInt(account.prepaidUsdc.toString()),
       price: BigInt(account.price.toString()),
       validUntil: BigInt(account.validUntil.toString()),
-      jobCount: account.jobCount,
-    };
-  }
-
-  /** Read a job account by id, or `null` if it does not exist. */
-  async readJob(jobId: string): Promise<JobInfo | null> {
-    const account = await this.accounts.job.fetchNullable(
-      jobPda(hexToBytes(jobId), this.programId),
-    );
-    if (!account) return null;
-    const delegates: PublicKey[] = [];
-    for (let i = 0; i < account.delegateCount; i++) {
-      delegates.push(account.delegates[i]);
-    }
-    return {
-      jobId: bytesToHex(Uint8Array.from(account.jobId)),
-      owner: account.owner,
-      delegates,
+      usedRounds: BigInt(account.usedRounds.toString()),
+      maxRounds: BigInt(account.maxRounds.toString()),
       delegateCount: account.delegateCount,
-      apiConfigHash: bytesToHex(Uint8Array.from(account.apiConfigHash)),
-      decimals: account.decimals,
-      signaturesRequired: account.signaturesRequired,
-      createdAt: BigInt(account.createdAt.toString()),
+      maxDelegates: account.maxDelegates,
+      maxSigners: account.maxSigners,
     };
   }
 
@@ -308,45 +284,12 @@ export class MolphaSolanaClient {
     return price;
   }
 
-  async createJob(
-    args: { apiConfigHash: Uint8Array; signaturesRequired: number; decimals: number },
-    owner: PublicKey = this.wallet,
-  ): Promise<CreateJobResult> {
-    const apiConfigHash = toFixedBytes(args.apiConfigHash, 32, "apiConfigHash");
-    const subscription = subscriptionPda(owner, this.programId);
-    const sub = await this.accounts.subscription.fetch(subscription);
-    const planId = planIdFromVariant(sub.planType);
-
-    const jobId = deriveJobId(owner.toBytes(), apiConfigHash);
-
-    const signature = await this.methods
-      .createJob(
-        {
-          apiConfigHash: Array.from(apiConfigHash),
-          signaturesRequired: args.signaturesRequired,
-          decimals: args.decimals,
-        },
-        Array.from(jobId),
-      )
-      .accounts({
-        owner,
-        protocolConfig: protocolConfigPda(this.programId),
-        plan: planPda(planId, this.programId),
-        job: jobPda(jobId, this.programId),
-        subscription,
-        feed: feedPda(jobId, this.programId),
-        systemProgram: SYSTEM_PROGRAM_ID,
-      })
-      .rpc();
-    return { signature, jobId: bytesToHex(jobId) };
-  }
-
   async submitDataUpdate(
     result: DataUpdateResult,
     opts?: { computeUnitLimit?: number },
   ): Promise<SubmitResult> {
     const registry = await this.fetchRegistry();
-    const jobId = hexToBytes(result.jobId);
+    const feedId = hexToBytes(result.feedId);
     const remaining = resolveRemainingAccounts(result, registry, this.programId);
     const cuIx = ComputeBudgetProgram.setComputeUnitLimit({
       units: opts?.computeUnitLimit ?? DEFAULT_COMPUTE_UNIT_LIMIT,
@@ -357,7 +300,8 @@ export class MolphaSolanaClient {
       .accounts({
         submitter: this.wallet,
         registryState: registryStatePda(this.programId),
-        feed: feedPda(jobId, this.programId),
+        feed: feedPda(feedId, this.programId),
+        systemProgram: SYSTEM_PROGRAM_ID,
       })
       .remainingAccounts(remaining)
       .preInstructions([cuIx])
@@ -365,39 +309,14 @@ export class MolphaSolanaClient {
     return { signature };
   }
 
-  async readFeed(jobId: string): Promise<FeedAccount | null> {
-    const feed = feedPda(hexToBytes(jobId), this.programId);
+  async readFeed(feedId: string): Promise<FeedAccount | null> {
+    const feed = feedPda(hexToBytes(feedId), this.programId);
     return (await this.accounts.feed.fetchNullable(feed)) as FeedAccount | null;
-  }
-
-  async verifyDataUpdate(
-    result: DataUpdateResult,
-  ): Promise<{ value: string; canonicalTimestamp: string }> {
-    const registry = await this.fetchRegistry();
-    const remaining = resolveRemainingAccounts(result, registry, this.programId);
-
-    const ix = await this.methods
-      .verifyDataUpdate(this.buildSubmitArgs(result))
-      .accounts({ registryState: registryStatePda(this.programId) })
-      .remainingAccounts(remaining)
-      .instruction();
-
-    const tx = new Transaction().add(ix);
-    tx.feePayer = this.wallet;
-    const { connection } = this.provider;
-    tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
-
-    const sim = await connection.simulateTransaction(tx);
-    const ret = sim.value.returnData;
-    if (!ret) {
-      throw new Error(`verify_data_update returned no data: ${sim.value.err ?? "unknown"}`);
-    }
-    return decodeVerifyReturn(base64ToBytes(ret.data[0]));
   }
 
   /**
    * Authenticate gateway-provided private API encryption keys against the
-   * on-chain registry index accounts for the round's registry version.
+   * on-chain Node accounts for the round's registry version.
    */
   async verifyNodeKeysForPrivateApi(args: NodeKeyVerifierArgs): Promise<void> {
     const registry = await this.fetchRegistry();
@@ -410,11 +329,11 @@ export class MolphaSolanaClient {
           args.registryVersion,
           registry,
         );
-        const account = await this.fetchRegistryIndexAccount(registryIndex, node.index);
+        const account = await this.fetchNodeAccount(registryIndex, node.index);
         const onChainKey = secp256k1PublicKeyFromCoordinates(
-          registryIndexCoordinate(account, "secp256k1PubkeyX", "secp256k1_pubkey_x"),
-          registryIndexCoordinate(account, "secp256k1PubkeyY", "secp256k1_pubkey_y"),
-          `RegistryIndex(${registryIndex}) secp256k1 public key`,
+          nodeCoordinate(account, "secp256k1PubkeyX", "secp256k1_pubkey_x"),
+          nodeCoordinate(account, "secp256k1PubkeyY", "secp256k1_pubkey_y"),
+          `Node(${registryIndex}) secp256k1 public key`,
         );
         const gatewayKey = normalizeSecp256k1PublicKeyHex(
           node.signingKey,
@@ -422,7 +341,7 @@ export class MolphaSolanaClient {
         );
         if (gatewayKey !== onChainKey) {
           throw new Error(
-            `Gateway selected node ${node.index} signingKey does not match on-chain RegistryIndex(${registryIndex})`,
+            `Gateway selected node ${node.index} signingKey does not match on-chain Node(${registryIndex})`,
           );
         }
       }),
@@ -431,30 +350,30 @@ export class MolphaSolanaClient {
 
   private buildSubmitArgs(result: DataUpdateResult) {
     return {
-      jobId: Array.from(hexToBytes(result.jobId)),
-      signaturesRequired: result.signaturesRequired,
+      feedId: Array.from(hexToBytes(result.feedId)),
       registryVersion: result.registryVersion,
-      signersBitmap: Array.from(toFixedBytes(result.signersBitmap, 32, "signersBitmap")),
-      value: Array.from(toFixedBytes(result.valuePacked, 32, "valuePacked")),
+      value: Buffer.from(hexToBytes(result.valuePacked)),
       canonicalTimestamp: new BN(result.timestamp),
+      signaturesRequired: result.signaturesRequired,
       aggSigS: Array.from(toFixedBytes(result.s, 32, "s")),
       commitmentAddr: Array.from(toFixedBytes(result.commitmentAddr, 20, "commitmentAddr")),
+      signersBitmap: Array.from(toFixedBytes(result.signersBitmap, 32, "signersBitmap")),
     };
   }
 
   private decodePlan(account: {
     planType: Record<string, unknown>;
     subscriptionPrice: { toString(): string };
-    maxJobs: number;
     maxSigners: number;
+    maxDelegates: number;
     privateApiEnabled: boolean;
     isActive: boolean;
   }): PlanInfo {
     return {
       planType: planIdFromVariant(account.planType) as unknown as PlanType,
       subscriptionPrice: BigInt(account.subscriptionPrice.toString()),
-      maxJobs: account.maxJobs,
       maxSigners: account.maxSigners,
+      maxDelegates: account.maxDelegates,
       privateApiEnabled: account.privateApiEnabled,
       isActive: account.isActive,
     };
@@ -468,24 +387,23 @@ export class MolphaSolanaClient {
       currentVersion: registry.currentVersion,
       previousVersion: registry.previousVersion,
       previousExpiresAt: BigInt(registry.previousExpiresAt.toString()),
+      redundancyBuffer: registry.redundancyBuffer,
       lastTransitionType: registry.lastTransitionType,
       removedOldIndex: registry.removedOldIndex,
       movedOldIndex: registry.movedOldIndex,
     };
   }
 
-  private async fetchRegistryIndexAccount(
+  private async fetchNodeAccount(
     registryIndex: number,
     selectedNodeIndex: number,
-  ): Promise<RegistryIndexAccount> {
+  ): Promise<NodeAccount> {
     try {
-      return await this.accounts.registryIndex.fetch(
-        registryIndexPda(registryIndex, this.programId),
-      );
+      return await this.accounts.node.fetch(nodePda(registryIndex, this.programId));
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       throw new Error(
-        `Failed to fetch on-chain RegistryIndex(${registryIndex}) for selected node ${selectedNodeIndex}: ${detail}`,
+        `Failed to fetch on-chain Node(${registryIndex}) for selected node ${selectedNodeIndex}: ${detail}`,
       );
     }
   }
@@ -513,23 +431,16 @@ function toUsdcBaseUnits(amount: bigint | number | BN, label: string): bigint {
   return BigInt(amount.toString());
 }
 
-function base64ToBytes(b64: string): Uint8Array {
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-
-function registryIndexCoordinate(
-  account: RegistryIndexAccount,
+function nodeCoordinate(
+  account: NodeAccount,
   camelCaseField: "secp256k1PubkeyX" | "secp256k1PubkeyY",
   snakeCaseField: "secp256k1_pubkey_x" | "secp256k1_pubkey_y",
 ): Uint8Array {
   const value = account[camelCaseField] ?? account[snakeCaseField];
   if (!(value instanceof Uint8Array) && !Array.isArray(value)) {
-    throw new Error(`RegistryIndex account is missing ${camelCaseField}`);
+    throw new Error(`Node account is missing ${camelCaseField}`);
   }
-  return toFixedBytes(Uint8Array.from(value), 32, `RegistryIndex.${camelCaseField}`);
+  return toFixedBytes(Uint8Array.from(value), 32, `Node.${camelCaseField}`);
 }
 
 function selectedNodesForVerifier(args: NodeKeyVerifierArgs): Node[] {

@@ -7,10 +7,9 @@ import { u32le, utf8 } from "../core/encoding.js";
 
 const SEED_CONFIG = utf8("molpha_config");
 const SEED_REGISTRY = utf8("molpha_registry");
-const SEED_REGISTRY_INDEX = utf8("molpha_registry_index");
+const SEED_NODE = utf8("molpha_node");
 const SEED_PLAN = utf8("molpha_plan");
 const SEED_SUBSCRIPTION = utf8("molpha_subscription");
-const SEED_JOB = utf8("molpha_job");
 const SEED_FEED = utf8("molpha_feed");
 
 /** Virtual registry index used for a removed slot during a version transition. */
@@ -25,18 +24,16 @@ export const protocolConfigPda = (programId: PublicKey): PublicKey =>
 export const registryStatePda = (programId: PublicKey): PublicKey =>
   pda([SEED_REGISTRY], programId);
 
-export const registryIndexPda = (index: number, programId: PublicKey): PublicKey =>
-  pda([SEED_REGISTRY_INDEX, u32le(index)], programId);
+/** Slot-keyed `Node` account PDA: `["molpha_node", index u32 LE]`. */
+export const nodePda = (index: number, programId: PublicKey): PublicKey =>
+  pda([SEED_NODE, u32le(index)], programId);
 
-/** Plan PDA is `[b"molpha_plan", [planType as u8]]` in `subscribe/create_job`. */
+/** Plan PDA is `[b"molpha_plan", [planType as u8]]` in `subscribe`. */
 export const planPda = (planId: number, programId: PublicKey): PublicKey =>
   pda([SEED_PLAN, Uint8Array.of(planId)], programId);
 
 export const subscriptionPda = (owner: PublicKey, programId: PublicKey): PublicKey =>
   pda([SEED_SUBSCRIPTION, owner.toBytes()], programId);
 
-export const jobPda = (jobId: Uint8Array, programId: PublicKey): PublicKey =>
-  pda([SEED_JOB, jobId], programId);
-
-export const feedPda = (jobId: Uint8Array, programId: PublicKey): PublicKey =>
-  pda([SEED_FEED, jobId], programId);
+export const feedPda = (feedId: Uint8Array, programId: PublicKey): PublicKey =>
+  pda([SEED_FEED, feedId], programId);

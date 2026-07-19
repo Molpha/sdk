@@ -3,20 +3,20 @@ import { describe, expect, it } from "vitest";
 import type { DataUpdateResult } from "../src/core/types.js";
 import {
   bitmapToIndices,
-  decodeVerifyReturn,
   resolveRegistryIndexForVersion,
   type RegistryStateView,
   resolveRemainingAccounts,
 } from "../src/solana/accounts.js";
-import { registryIndexPda, VIRTUAL_INDEX } from "../src/solana/pdas.js";
+import { MOLPHA_PROGRAM_ADDRESS } from "../idl/index.js";
+import { nodePda, VIRTUAL_INDEX } from "../src/solana/pdas.js";
 
-const programId = new PublicKey("MoLFeTRpDZgckPjjbLwW1wB9n85bQiqboPnvw9RwoG8");
+const programId = new PublicKey(MOLPHA_PROGRAM_ADDRESS);
 
 /** bits 0,1,2 set in the 32-byte big-endian word. */
 const BITMAP_012 = "00".repeat(31) + "07";
 
 const baseResult: DataUpdateResult = {
-  jobId: "11".repeat(32),
+  feedId: "11".repeat(32),
   value: "1",
   valuePacked: "00".repeat(32),
   timestamp: 1,
@@ -32,13 +32,14 @@ const baseRegistry: RegistryStateView = {
   currentVersion: 5,
   previousVersion: 4,
   previousExpiresAt: 9_999_999_999n,
+  redundancyBuffer: 2,
   lastTransitionType: { none: {} },
   removedOldIndex: 0xffffffff,
   movedOldIndex: 0xffffffff,
 };
 
 const keys = (metas: { pubkey: PublicKey }[]) => metas.map((m) => m.pubkey.toBase58());
-const pda = (i: number) => registryIndexPda(i, programId).toBase58();
+const pda = (i: number) => nodePda(i, programId).toBase58();
 
 describe("bitmapToIndices", () => {
   it("reads set bits from a 32-byte big-endian word", () => {
@@ -108,23 +109,5 @@ describe("resolveRegistryIndexForVersion", () => {
     expect(resolveRegistryIndexForVersion(0, 4, registry)).toBe(0);
     expect(resolveRegistryIndexForVersion(1, 4, registry)).toBe(VIRTUAL_INDEX);
     expect(resolveRegistryIndexForVersion(2, 4, registry)).toBe(1);
-  });
-});
-
-describe("decodeVerifyReturn", () => {
-  it("decodes value + timestamp from the 72-byte return payload", () => {
-    const data = new Uint8Array(72);
-    data.set(new Uint8Array(32).fill(0xab), 0);
-    const ts = new DataView(data.buffer, 32, 8);
-    ts.setBigInt64(0, 1_700_000_123n, false);
-
-    expect(decodeVerifyReturn(data)).toEqual({
-      value: "ab".repeat(32),
-      canonicalTimestamp: "1700000123",
-    });
-  });
-
-  it("rejects non-72-byte payloads", () => {
-    expect(() => decodeVerifyReturn(new Uint8Array(40))).toThrow(/size mismatch/);
   });
 });

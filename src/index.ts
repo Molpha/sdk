@@ -50,9 +50,12 @@ export class MolphaSDK {
     });
     this.gateway = new MolphaGateway(
       opts.endpoints,
-      () => this.solana.getRegistryVersion(),
+      () => this.solana.getRegistrySelectionConfig(),
       gatewaySignerFromWallet(opts.wallet),
-      { verifyNodeKeys: (args) => this.solana.verifyNodeKeysForPrivateApi(args) },
+      {
+        defaultSubscriptionOwner: opts.wallet.publicKey.toBase58(),
+        verifyNodeKeys: (args) => this.solana.verifyNodeKeysForPrivateApi(args),
+      },
     );
   }
 
@@ -61,10 +64,10 @@ export class MolphaSDK {
    * on-chain registry version) and submit it to the feed.
    */
   async requestAndSubmit(
-    jobId: string,
-    opts: Omit<RequestSignedDataOptions, "jobId">,
+    feedId: string,
+    opts: Omit<RequestSignedDataOptions, "feedId">,
   ): Promise<{ result: DataUpdateResult; signature: string }> {
-    const result = await this.gateway.requestSignedData({ jobId, ...opts });
+    const result = await this.gateway.requestSignedData({ feedId, ...opts });
     const { signature } = await this.solana.submitDataUpdate(result);
     return { result, signature };
   }

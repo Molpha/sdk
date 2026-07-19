@@ -12,3 +12,4 @@ test-keypair.json
 *keypair*.json
 *.pem
 id.json
+tmp

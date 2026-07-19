@@ -7,7 +7,7 @@ export type MolphaStarknetNetwork = "starknet-sepolia";
 
 /** Deployed verifier address on Starknet Sepolia. */
 export const MOLPHA_VERIFIER_STARKNET_SEPOLIA =
-  "0x0489ddba93d59dbd6ea6aed84bd0697a45af7d23b278262ad78faa6de4ad6af0" as const;
+  "0x0378df4dbecf8f0c7daa801282932f7011c7a5e5773bab9eaf68f5fa5e7530ef" as const;
 
 /** Network id -> deployed verifier address. */
 export const MOLPHA_VERIFIER_STARKNET_ADDRESSES: Record<
