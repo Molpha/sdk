@@ -24,7 +24,7 @@ const SAMPLE_RESULT: DataUpdateResult = {
 describe("MOLPHA verifier address", () => {
   it("exports the CREATE2 address used on all EVM chains", () => {
     expect(MOLPHA_VERIFIER_ADDRESS).toBe(
-      "0x525A1e34edf68aa0DAe536E3A5B1861B9Ca1E3A2",
+      "0xE1fd792b7E54e0C8F0Cd1c8055E446ff36d233eB",
     );
   });
 });
