@@ -1,7 +1,8 @@
 /**
  * `MolphaSolanaClient` — consumer on-chain surface only (subscribe, extend,
- * submitDataUpdate, readFeed/readPlan/readSubscription, getRegistryVersion).
- * Built from an Anchor `Program` over the vendored IDL.
+ * submitDataUpdate, readFeed/readPlan/readSubscription, getRegistryVersion,
+ * verifyNodeKeysForPrivateApi). Built from an Anchor `Program` over the
+ * vendored IDL.
  */
 import {
   AnchorProvider,
@@ -18,10 +19,19 @@ import {
   PublicKey,
 } from "@solana/web3.js";
 import { hexToBytes, toFixedBytes } from "../core/encoding.js";
-import type { DataUpdateResult } from "../core/types.js";
-import { type RegistryStateView, resolveRemainingAccounts } from "./accounts.js";
+import {
+  normalizeSecp256k1PublicKeyHex,
+  secp256k1PublicKeyFromCoordinates,
+} from "../core/nodeKeys.js";
+import type { DataUpdateResult, Node, NodeKeyVerifierArgs } from "../core/types.js";
+import {
+  type RegistryStateView,
+  resolveRegistryIndexForVersion,
+  resolveRemainingAccounts,
+} from "./accounts.js";
 import {
   feedPda,
+  nodePda,
   planPda,
   protocolConfigPda,
   registryStatePda,
@@ -81,6 +91,13 @@ export interface FeedAccount {
   signersBitmap: number[];
   registryVersion: number;
   bump: number;
+}
+
+interface NodeAccount {
+  secp256k1PubkeyX?: Uint8Array | number[];
+  secp256k1PubkeyY?: Uint8Array | number[];
+  secp256k1_pubkey_x?: Uint8Array | number[];
+  secp256k1_pubkey_y?: Uint8Array | number[];
 }
 
 interface CreateClientOpts {
@@ -284,6 +301,40 @@ export class MolphaSolanaClient {
     return (await this.accounts.feed.fetchNullable(feed)) as FeedAccount | null;
   }
 
+  /**
+   * Authenticate gateway-provided private API encryption keys against the
+   * on-chain Node accounts for the round's registry version.
+   */
+  async verifyNodeKeysForPrivateApi(args: NodeKeyVerifierArgs): Promise<void> {
+    const registry = await this.fetchRegistry();
+    const selectedNodes = selectedNodesForVerifier(args);
+
+    await Promise.all(
+      selectedNodes.map(async (node) => {
+        const registryIndex = resolveRegistryIndexForVersion(
+          node.index,
+          args.registryVersion,
+          registry,
+        );
+        const account = await this.fetchNodeAccount(registryIndex, node.index);
+        const onChainKey = secp256k1PublicKeyFromCoordinates(
+          nodeCoordinate(account, "secp256k1PubkeyX", "secp256k1_pubkey_x"),
+          nodeCoordinate(account, "secp256k1PubkeyY", "secp256k1_pubkey_y"),
+          `Node(${registryIndex}) secp256k1 public key`,
+        );
+        const gatewayKey = normalizeSecp256k1PublicKeyHex(
+          node.signingKey,
+          `Gateway selected node ${node.index} signingKey`,
+        );
+        if (gatewayKey !== onChainKey) {
+          throw new Error(
+            `Gateway selected node ${node.index} signingKey does not match on-chain Node(${registryIndex})`,
+          );
+        }
+      }),
+    );
+  }
+
   private buildSubmitArgs(result: DataUpdateResult) {
     return {
       feedId: Array.from(hexToBytes(result.feedId)),
@@ -329,6 +380,20 @@ export class MolphaSolanaClient {
     };
   }
 
+  private async fetchNodeAccount(
+    registryIndex: number,
+    selectedNodeIndex: number,
+  ): Promise<NodeAccount> {
+    try {
+      return await this.accounts.node.fetch(nodePda(registryIndex, this.programId));
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `Failed to fetch on-chain Node(${registryIndex}) for selected node ${selectedNodeIndex}: ${detail}`,
+      );
+    }
+  }
+
   private async fetchProtocolTokens(): Promise<{ usdcMint: PublicKey; treasury: PublicKey }> {
     const config = await this.accounts.protocolConfig.fetch(
       protocolConfigPda(this.programId),
@@ -350,4 +415,62 @@ function toUsdcBaseUnits(amount: bigint | number | BN, label: string): bigint {
     return BigInt(amount);
   }
   return BigInt(amount.toString());
+}
+
+function nodeCoordinate(
+  account: NodeAccount,
+  camelCaseField: "secp256k1PubkeyX" | "secp256k1PubkeyY",
+  snakeCaseField: "secp256k1_pubkey_x" | "secp256k1_pubkey_y",
+): Uint8Array {
+  const value = account[camelCaseField] ?? account[snakeCaseField];
+  if (!(value instanceof Uint8Array) && !Array.isArray(value)) {
+    throw new Error(`Node account is missing ${camelCaseField}`);
+  }
+  return toFixedBytes(Uint8Array.from(value), 32, `Node.${camelCaseField}`);
+}
+
+function selectedNodesForVerifier(args: NodeKeyVerifierArgs): Node[] {
+  if (args.selectedIndexes.length === 0) {
+    throw new Error("Private API node-key verification requires at least one selected index");
+  }
+  if (args.selectedNodes.length !== args.selectedIndexes.length) {
+    throw new Error(
+      `Private API node-key verification expected ${args.selectedIndexes.length} selected nodes, got ${args.selectedNodes.length}`,
+    );
+  }
+
+  const expected = new Set<number>();
+  for (const index of args.selectedIndexes) {
+    if (!Number.isInteger(index) || index < 0) {
+      throw new Error(`Private API selected index must be a non-negative integer: ${index}`);
+    }
+    if (expected.has(index)) {
+      throw new Error(`Private API selected index is duplicated: ${index}`);
+    }
+    expected.add(index);
+  }
+
+  const byIndex = new Map<number, Node>();
+  for (const node of args.selectedNodes) {
+    if (!Number.isInteger(node.index) || node.index < 0) {
+      throw new Error(
+        `Private API selected node index must be a non-negative integer: ${node.index}`,
+      );
+    }
+    if (!expected.has(node.index)) {
+      throw new Error(`Private API selected node ${node.index} was not requested`);
+    }
+    if (byIndex.has(node.index)) {
+      throw new Error(`Private API selected node index is duplicated: ${node.index}`);
+    }
+    byIndex.set(node.index, node);
+  }
+
+  return args.selectedIndexes.map((index) => {
+    const node = byIndex.get(index);
+    if (!node) {
+      throw new Error(`Private API selected node is missing for index: ${index}`);
+    }
+    return node;
+  });
 }

@@ -6,6 +6,7 @@ import {
   bytesToHex0x,
   hexToBytes,
 } from "../core/encoding.js";
+import { normalizeSecp256k1PublicKeyHex } from "../core/nodeKeys.js";
 import { canonicalizeAPIConfig } from "../core/apiconfig.js";
 import {
   deriveGroupBitmap,
@@ -17,6 +18,7 @@ import type {
   APIConfig,
   DataUpdateResult,
   Node,
+  NodeKeyVerifier,
   Signer,
 } from "../core/types.js";
 import { authMessage } from "./auth.js";
@@ -60,6 +62,34 @@ export interface RequestSignedDataOptions {
    * when the on-chain registry version changes.
    */
   context?: Partial<RoundContext>;
+  /**
+   * Authenticates selected gateway node encryption keys before private API
+   * secrets are encrypted. Overrides the gateway-level verifier when set.
+   */
+  verifyNodeKeys?: NodeKeyVerifier;
+  /**
+   * Unsafe development escape hatch for standalone gateway usage. When true,
+   * encrypted private API requests may use gateway-provided node keys without
+   * authentication. Defaults to false.
+   */
+  allowUnverifiedNodeKeysForPrivateApi?: boolean;
+}
+
+export interface MolphaGatewayOptions {
+  /** Solana pubkey (base58) of the subscription owner used when a request omits it. */
+  defaultSubscriptionOwner?: string;
+  /** Solana pubkey (base58) of the consumer authority used when a request omits it. */
+  defaultConsumerAuthority?: string;
+  /**
+   * Authenticates selected gateway node encryption keys before private API
+   * secrets are encrypted.
+   */
+  verifyNodeKeys?: NodeKeyVerifier;
+  /**
+   * Unsafe development escape hatch. When true, encrypted private API requests
+   * may use gateway-provided node keys without authentication. Defaults to false.
+   */
+  allowUnverifiedNodeKeysForPrivateApi?: boolean;
 }
 
 /**
@@ -119,6 +149,8 @@ export class MolphaGateway {
   private readonly defaultSigner?: Signer;
   private readonly defaultSubscriptionOwner?: string;
   private readonly defaultConsumerAuthority?: string;
+  private readonly verifyNodeKeys?: NodeKeyVerifier;
+  private readonly allowUnverifiedNodeKeysForPrivateApi: boolean;
 
   constructor(
     endpoints?: string | string[],
@@ -128,7 +160,11 @@ export class MolphaGateway {
       );
     },
     defaultSigner?: Signer,
-    defaultSubscriptionOwner?: string,
+    /**
+     * Either a default subscription owner (base58) or gateway options. A string
+     * keeps the previous positional form used by standalone callers/tests.
+     */
+    defaultSubscriptionOwnerOrOptions?: string | MolphaGatewayOptions,
     defaultConsumerAuthority?: string,
   ) {
     const list =
@@ -141,8 +177,21 @@ export class MolphaGateway {
     this.endpoints = list.map((e) => e.replace(/\/$/, ""));
     this.getRegistryVersion = getRegistryVersion;
     this.defaultSigner = defaultSigner;
-    this.defaultSubscriptionOwner = defaultSubscriptionOwner;
-    this.defaultConsumerAuthority = defaultConsumerAuthority ?? defaultSubscriptionOwner;
+
+    const options: MolphaGatewayOptions =
+      typeof defaultSubscriptionOwnerOrOptions === "string"
+        ? {
+            defaultSubscriptionOwner: defaultSubscriptionOwnerOrOptions,
+            defaultConsumerAuthority,
+          }
+        : (defaultSubscriptionOwnerOrOptions ?? {});
+
+    this.defaultSubscriptionOwner = options.defaultSubscriptionOwner;
+    this.defaultConsumerAuthority =
+      options.defaultConsumerAuthority ?? options.defaultSubscriptionOwner;
+    this.verifyNodeKeys = options.verifyNodeKeys;
+    this.allowUnverifiedNodeKeysForPrivateApi =
+      options.allowUnverifiedNodeKeysForPrivateApi ?? false;
   }
 
   /** Tries endpoints in order; returns the first node list it can fetch. */
@@ -164,14 +213,14 @@ export class MolphaGateway {
   }
 
   /**
-   * Fetch the slow-changing round inputs (registry version, node set, feed
-   * config) once so they can be reused across many {@link requestSignedData}
-   * calls. Pass the result back via `requestSignedData({ ..., context })` to
-   * skip the prelude and run a single-round "short" flow.
+   * Fetch the slow-changing round inputs (registry version, node set) once so
+   * they can be reused across many {@link requestSignedData} calls. Pass the
+   * result back via `requestSignedData({ ..., context })` to skip the prelude
+   * and run a single-round "short" flow.
    *
-   * All three fetches run in parallel.
+   * Both fetches run in parallel.
    */
-  async prepareContext(feedId: string): Promise<RoundContext> {
+  async prepareContext(_feedId: string): Promise<RoundContext> {
     const [registryVersion, nodes] = await Promise.all([
       this.getRegistryVersion(),
       this.getNodes(),
@@ -199,6 +248,16 @@ export class MolphaGateway {
       maxRetries = 15,
       timeoutMs = 5000,
     } = opts;
+
+    const verifyNodeKeys = opts.verifyNodeKeys ?? this.verifyNodeKeys;
+    const allowUnverified =
+      opts.allowUnverifiedNodeKeysForPrivateApi ??
+      this.allowUnverifiedNodeKeysForPrivateApi;
+    if (encrypt && !verifyNodeKeys && !allowUnverified) {
+      throw new Error(
+        "Private API encryption requires authenticated node keys. Provide verifyNodeKeys or set allowUnverifiedNodeKeysForPrivateApi: true for unsafe development use.",
+      );
+    }
 
     const feedIdBytes = hexToBytes(feedId);
     const { registryVersion, nodes } = await this.resolveContext(
@@ -228,7 +287,23 @@ export class MolphaGateway {
       );
       const bitmap = deriveGroupBitmap(seed, nodes.length, groupSize);
       const indices = selectedIndices(bitmap, nodes.length);
-      const selected = nodes.filter((n) => indices.includes(n.index));
+
+      let encKeyBundle: ReturnType<typeof encryptForNodes> | undefined;
+      if (encrypt) {
+        const selected = selectedNodesForPrivateApiEncryption(nodes, indices);
+
+        if (verifyNodeKeys) {
+          await verifyNodeKeys({
+            feedId,
+            registryVersion,
+            timestamp,
+            selectedIndexes: [...indices],
+            selectedNodes: selected.map((node) => ({ ...node })),
+          });
+        }
+
+        encKeyBundle = encryptForNodes(requestApiConfig, encrypt.secrets, selected);
+      }
 
       const authSigner = signer ?? this.defaultSigner;
       const authSig = authSigner
@@ -246,9 +321,7 @@ export class MolphaGateway {
         authSig: bytesToHex0x(authSig),
         apiConfig: requestApiConfig,
       };
-      if (encrypt) {
-        body.encKeyBundle = encryptForNodes(requestApiConfig, encrypt.secrets, selected);
-      }
+      if (encKeyBundle) body.encKeyBundle = encKeyBundle;
 
       for (const endpoint of this.endpoints) {
         try {
@@ -310,7 +383,7 @@ export class MolphaGateway {
    * Whatever fetching remains runs in parallel.
    */
   private async resolveContext(
-    feedId: string,
+    _feedId: string,
     cached?: Partial<RoundContext>,
   ): Promise<RoundContext> {
     const [registryVersion, nodes] = await Promise.all([
@@ -368,8 +441,65 @@ export class MolphaGateway {
   }
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function selectedNodesForPrivateApiEncryption(
+  nodes: Node[],
+  selectedIndexes: number[],
+): Node[] {
+  if (!Array.isArray(nodes)) {
+    throw new Error("Private API encryption requires a gateway node array");
+  }
+  if (selectedIndexes.length === 0) {
+    throw new Error("Private API encryption requires at least one selected node");
+  }
+
+  const selectedIndexSet = new Set<number>();
+  for (const index of selectedIndexes) {
+    if (!Number.isInteger(index) || index < 0) {
+      throw new Error(
+        `Private API encryption selected index must be a non-negative integer: ${index}`,
+      );
+    }
+    if (selectedIndexSet.has(index)) {
+      throw new Error(`Private API encryption selected index is duplicated: ${index}`);
+    }
+    selectedIndexSet.add(index);
+  }
+
+  const selectedByIndex = new Map<number, Node>();
+  const nodeIndexes = new Set<number>();
+  for (const node of nodes) {
+    if (!Number.isInteger(node.index) || node.index < 0) {
+      throw new Error(`Gateway node index must be a non-negative integer: ${node.index}`);
+    }
+    if (node.index >= nodes.length) {
+      throw new Error(
+        `Gateway node index ${node.index} is outside the node list range 0..${nodes.length - 1}`,
+      );
+    }
+    if (nodeIndexes.has(node.index)) {
+      throw new Error(`Gateway returned duplicate node index: ${node.index}`);
+    }
+    nodeIndexes.add(node.index);
+    if (!selectedIndexSet.has(node.index)) continue;
+    selectedByIndex.set(node.index, node);
+  }
+
+  const selectedSigningKeys = new Set<string>();
+  return selectedIndexes.map((index) => {
+    const node = selectedByIndex.get(index);
+    if (!node) {
+      throw new Error(`Gateway node list is missing selected node index: ${index}`);
+    }
+    const signingKey = normalizeSecp256k1PublicKeyHex(
+      node.signingKey,
+      `Gateway selected node ${index} signingKey`,
+    );
+    if (selectedSigningKeys.has(signingKey)) {
+      throw new Error(`Gateway returned duplicate selected node signingKey: ${index}`);
+    }
+    selectedSigningKeys.add(signingKey);
+    return node;
+  });
 }
 
 function formatGatewayErrorMessage(

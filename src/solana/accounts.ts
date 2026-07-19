@@ -38,7 +38,7 @@ export function resolveRemainingAccounts(
 ): AccountMeta[] {
   const bits = bitmapToIndices(result.signersBitmap);
 
-  const mapIndex = mapIndexFn(result.registryVersion, registry);
+  const mapIndex = registryIndexMapper(result.registryVersion, registry);
   return bits.map((bit) => ({
     pubkey: nodePda(mapIndex(bit), programId),
     isSigner: false,
@@ -46,7 +46,16 @@ export function resolveRemainingAccounts(
   }));
 }
 
-function mapIndexFn(
+/** Map a selected node index to its registry-index PDA index for a registry version. */
+export function resolveRegistryIndexForVersion(
+  index: number,
+  registryVersion: number,
+  registry: RegistryStateView,
+): number {
+  return registryIndexMapper(registryVersion, registry)(index);
+}
+
+function registryIndexMapper(
   registryVersion: number,
   registry: RegistryStateView,
 ): (bit: number) => number {

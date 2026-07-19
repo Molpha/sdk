@@ -12,6 +12,26 @@ export interface Node {
   signingKey: string;
 }
 
+/** Selected node-key material that must be authenticated before private API encryption. */
+export interface NodeKeyVerifierArgs {
+  /** 32-byte feed id, hex. */
+  feedId: string;
+  /** On-chain registry version the gateway round is bound to. */
+  registryVersion: number;
+  /** Canonical timestamp used to derive the selected indexes. */
+  timestamp: number;
+  /** Selected node indexes derived from the round bitmap, ascending. */
+  selectedIndexes: readonly number[];
+  /** Gateway-provided selected nodes whose keys must be authenticated. */
+  selectedNodes: readonly Node[];
+}
+
+/**
+ * Authenticates selected gateway node encryption keys. Throwing fails the
+ * private API request before secrets are encrypted or posted.
+ */
+export type NodeKeyVerifier = (args: NodeKeyVerifierArgs) => void | Promise<void>;
+
 /** The off-chain API definition a feed resolves. */
 export interface APIConfig {
   url: string;
