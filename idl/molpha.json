@@ -1,5 +1,5 @@
 {
-  "address": "MoLF4sBjvfsYYdwE84yU9FcTkpd4WSGvR92rpLQgbpn",
+  "address": "MoLFGDpFoVnQgwbkTNScKPohCxhbfd61JjFrnotuwzh",
   "metadata": {
     "name": "molpha",
     "version": "0.1.0",
@@ -175,65 +175,6 @@
           }
         }
       ]
-    },
-    {
-      "name": "admin_withdraw_subscription_vault",
-      "discriminator": [
-        232,
-        46,
-        1,
-        209,
-        244,
-        177,
-        51,
-        230
-      ],
-      "accounts": [
-        {
-          "name": "protocol_config",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  109,
-                  111,
-                  108,
-                  112,
-                  104,
-                  97,
-                  95,
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "usdc_mint"
-        },
-        {
-          "name": "treasury",
-          "writable": true
-        },
-        {
-          "name": "destination",
-          "writable": true
-        },
-        {
-          "name": "authority",
-          "signer": true
-        },
-        {
-          "name": "token_program"
-        }
-      ],
-      "args": []
     },
     {
       "name": "claim_gateway_rewards",
@@ -1781,6 +1722,10 @@
               {
                 "kind": "arg",
                 "path": "args.authority"
+              },
+              {
+                "kind": "account",
+                "path": "gateway"
               }
             ]
           }
@@ -1920,6 +1865,10 @@
               {
                 "kind": "arg",
                 "path": "args.authority"
+              },
+              {
+                "kind": "account",
+                "path": "gateway"
               },
               {
                 "kind": "arg",
@@ -2389,6 +2338,72 @@
       ]
     },
     {
+      "name": "update_node_endpoint",
+      "discriminator": [
+        63,
+        119,
+        147,
+        11,
+        73,
+        81,
+        230,
+        155
+      ],
+      "accounts": [
+        {
+          "name": "node_owner",
+          "signer": true
+        },
+        {
+          "name": "node_operator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  111,
+                  108,
+                  112,
+                  104,
+                  97,
+                  95,
+                  110,
+                  111,
+                  100,
+                  101,
+                  95,
+                  111,
+                  112,
+                  101,
+                  114,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "node_owner"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "UpdateNodeEndpointArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "update_plan",
       "discriminator": [
         119,
@@ -2724,6 +2739,19 @@
       ]
     },
     {
+      "name": "NodeEndpointUpdated",
+      "discriminator": [
+        121,
+        121,
+        209,
+        202,
+        113,
+        134,
+        46,
+        240
+      ]
+    },
+    {
       "name": "NodeRegistered",
       "discriminator": [
         15,
@@ -2979,251 +3007,256 @@
     },
     {
       "code": 6014,
+      "name": "InvalidNodeEndpoint",
+      "msg": "Node endpoint is invalid"
+    },
+    {
+      "code": 6015,
       "name": "InvalidTreasury",
       "msg": "treasury token account mismatch"
     },
     {
-      "code": 6015,
+      "code": 6016,
       "name": "InvalidOwnerUsdc",
       "msg": "owner_usdc token account mismatch"
     },
     {
-      "code": 6016,
+      "code": 6017,
       "name": "InvalidTreasuryOwner",
       "msg": "treasury must be owned by protocol_config"
     },
     {
-      "code": 6017,
+      "code": 6018,
       "name": "InvalidWithdrawDestination",
       "msg": "withdraw destination token account mismatch"
     },
     {
-      "code": 6018,
+      "code": 6019,
       "name": "InvalidSignature",
       "msg": "Invalid aggregate signature"
     },
     {
-      "code": 6019,
+      "code": 6020,
       "name": "GroupBitmapDerivationFailed",
       "msg": "Could not derive group bitmap"
     },
     {
-      "code": 6020,
+      "code": 6021,
       "name": "InvalidSignersBitmap",
       "msg": "Signers bitmap contains out-of-range indices"
     },
     {
-      "code": 6021,
+      "code": 6022,
       "name": "PlanNotActive",
       "msg": "plan exists but is_active is false"
     },
     {
-      "code": 6022,
+      "code": 6023,
       "name": "InvalidPlanParams",
       "msg": "invalid plan quorum or signer parameters"
     },
     {
-      "code": 6023,
+      "code": 6024,
       "name": "InvalidDelegateLimits",
       "msg": "invalid delegate limit parameters"
     },
     {
-      "code": 6024,
+      "code": 6025,
       "name": "DelegateCannotBeOwner",
       "msg": "delegate cannot be the owner"
     },
     {
-      "code": 6025,
+      "code": 6026,
       "name": "DelegateAccountRequired",
       "msg": "delegate account required for non-owner action"
     },
     {
-      "code": 6026,
+      "code": 6027,
       "name": "UnexpectedDelegateAccount",
       "msg": "delegate account must not be supplied for owner action"
     },
     {
-      "code": 6027,
+      "code": 6028,
       "name": "DelegateDataRequestLimitReached",
       "msg": "delegate data_requests_used >= max_data_requests"
     },
     {
-      "code": 6028,
+      "code": 6029,
       "name": "DelegateNotFound",
       "msg": "remove_delegate target not found"
     },
     {
-      "code": 6029,
+      "code": 6030,
       "name": "DelegateNotActive",
       "msg": "delegate is paused"
     },
     {
-      "code": 6030,
+      "code": 6031,
       "name": "SignaturesExceedDelegateMax",
       "msg": "signatures_required exceeds delegate.max_signers"
     },
     {
-      "code": 6031,
+      "code": 6032,
       "name": "DelegateCapReached",
       "msg": "subscription delegate_count >= plan.max_delegates"
     },
     {
-      "code": 6032,
+      "code": 6033,
       "name": "InvalidRegistrationSalt",
       "msg": "registration_salt must not be zero"
     },
     {
-      "code": 6033,
+      "code": 6034,
       "name": "InvalidSecp256k1KeyFingerprint",
       "msg": "secp256k1 key fingerprint does not match compressed key"
     },
     {
-      "code": 6034,
+      "code": 6035,
       "name": "InsufficientSigners",
       "msg": "popcount(signers_bitmap) < signatures_required"
     },
     {
-      "code": 6035,
+      "code": 6036,
       "name": "SignaturesExceedSubscriptionMax",
       "msg": "signatures_required exceeds subscription.max_signers"
     },
     {
-      "code": 6036,
+      "code": 6037,
       "name": "SignersNotSubsetOfSelection",
       "msg": "Signer bits outside selection bitmap"
     },
     {
-      "code": 6037,
+      "code": 6038,
       "name": "InvalidAggregateSignature",
       "msg": "PoP-Schnorr aggregate verification failed"
     },
     {
-      "code": 6038,
+      "code": 6039,
       "name": "FeedNotNewer",
       "msg": "canonical_timestamp <= feed.canonical_timestamp"
     },
     {
-      "code": 6039,
+      "code": 6040,
       "name": "MissingSignerAccount",
       "msg": "Missing or mis-ordered signer slot version account"
     },
     {
-      "code": 6040,
+      "code": 6041,
       "name": "SubscriptionNotActive",
       "msg": "subscription has expired"
     },
     {
-      "code": 6041,
+      "code": 6042,
       "name": "ConsumerSigInvalid",
       "msg": "consumer Ed25519 signature missing or invalid"
     },
     {
-      "code": 6042,
+      "code": 6043,
       "name": "QuorumBelowThreshold",
       "msg": "popcount(signers_bitmap) < signatures_required"
     },
     {
-      "code": 6043,
+      "code": 6044,
       "name": "GatewayNotBonded",
       "msg": "gateway not registered or bonded below gateway_bond_min"
     },
     {
-      "code": 6044,
+      "code": 6045,
       "name": "SubscriptionInactiveOrExhausted",
       "msg": "subscription inactive or round quota exhausted"
     },
     {
-      "code": 6045,
+      "code": 6046,
       "name": "DisputeAggSigMismatch",
       "msg": "supplied signature does not match committed agg_sig_hash"
     },
     {
-      "code": 6046,
+      "code": 6047,
       "name": "DisputeSignatureValid",
       "msg": "dispute failed: the committed signature verifies (no fraud)"
     },
     {
-      "code": 6047,
+      "code": 6048,
       "name": "GatewayIndexMismatch",
       "msg": "gateway_index does not match the bonded gateway"
     },
     {
-      "code": 6048,
+      "code": 6049,
       "name": "InsufficientBond",
       "msg": "bond amount below gateway_bond_min"
     },
     {
-      "code": 6049,
+      "code": 6050,
       "name": "CreditedBitmapMismatch",
       "msg": "agg_sig.signers_bitmap does not match signers_bitmap"
     },
     {
-      "code": 6050,
+      "code": 6051,
       "name": "RoundNotFinalizable",
       "msg": "round still inside dispute window; cannot finalize"
     },
     {
-      "code": 6051,
+      "code": 6052,
       "name": "RoundNotPending",
       "msg": "round is not pending"
     },
     {
-      "code": 6052,
+      "code": 6053,
       "name": "NothingToClaim",
       "msg": "no claimable rewards"
     },
     {
-      "code": 6053,
+      "code": 6054,
       "name": "InvalidInstructionsSysvar",
       "msg": "instructions sysvar account is invalid"
     },
     {
-      "code": 6054,
+      "code": 6055,
       "name": "UnauthorisedConsumer",
       "msg": "consumer authority is not the delegate authority"
     },
     {
-      "code": 6055,
+      "code": 6056,
       "name": "InvalidCreditNodeAccount",
       "msg": "mismatched or missing credited node account"
     },
     {
-      "code": 6056,
+      "code": 6057,
       "name": "AgentNotActive",
       "msg": "agent escrow is not active"
     },
     {
-      "code": 6057,
+      "code": 6058,
       "name": "AmountMismatch",
       "msg": "computed price does not match the agent-signed amount"
     },
     {
-      "code": 6058,
+      "code": 6059,
       "name": "EpochCapExceeded",
       "msg": "arithmetic overflow in escrow spend accounting"
     },
     {
-      "code": 6059,
+      "code": 6060,
       "name": "InsufficientAgentCredits",
       "msg": "escrow ATA balance below computed price"
     },
     {
-      "code": 6060,
+      "code": 6061,
       "name": "AgentSigInvalid",
       "msg": "agent request authorization signature is invalid or missing"
     },
     {
-      "code": 6061,
+      "code": 6062,
       "name": "InvalidAgentCaps",
       "msg": "agent cap parameters invalid"
     },
     {
-      "code": 6062,
+      "code": 6063,
       "name": "CreditedExceedsSelection",
       "msg": "credited signer count exceeds signatures_required + redundancy_buffer"
     },
     {
-      "code": 6063,
+      "code": 6064,
       "name": "InvalidValueLength",
       "msg": "value exceeds Feed::MAX_VALUE_LEN"
     }
@@ -3336,6 +3369,10 @@
           },
           {
             "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "gateway",
             "type": "pubkey"
           }
         ]
@@ -4021,6 +4058,35 @@
           {
             "name": "deactivated_at",
             "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "NodeEndpointUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "current_index",
+            "type": "u32"
+          },
+          {
+            "name": "ip",
+            "type": {
+              "array": [
+                "u8",
+                4
+              ]
+            }
+          },
+          {
+            "name": "port",
+            "type": "u16"
           }
         ]
       }
@@ -5432,6 +5498,27 @@
           {
             "name": "agent_epoch_len_secs",
             "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UpdateNodeEndpointArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "ip",
+            "type": {
+              "array": [
+                "u8",
+                4
+              ]
+            }
+          },
+          {
+            "name": "port",
+            "type": "u16"
           }
         ]
       }
