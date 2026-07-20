@@ -1,4 +1,4 @@
-import { PublicKey } from "@solana/web3.js";
+import { address } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import type { DataUpdateResult } from "../src/core/types.js";
 import {
@@ -9,8 +9,9 @@ import {
 } from "../src/solana/accounts.js";
 import { MOLPHA_PROGRAM_ADDRESS } from "../idl/index.js";
 import { nodePda, VIRTUAL_INDEX } from "../src/solana/pdas.js";
+import type { SolanaAccountMeta } from "../src/solana/kit.js";
 
-const programId = new PublicKey(MOLPHA_PROGRAM_ADDRESS);
+const programId = address(MOLPHA_PROGRAM_ADDRESS);
 
 /** bits 0,1,2 set in the 32-byte big-endian word. */
 const BITMAP_012 = "00".repeat(31) + "07";
@@ -38,8 +39,8 @@ const baseRegistry: RegistryStateView = {
   movedOldIndex: 0xffffffff,
 };
 
-const keys = (metas: { pubkey: PublicKey }[]) => metas.map((m) => m.pubkey.toBase58());
-const pda = (i: number) => nodePda(i, programId).toBase58();
+const keys = (metas: SolanaAccountMeta[]) => metas.map((m) => m.pubkey.toBase58());
+const pda = (i: number) => nodePda(i, programId);
 
 describe("bitmapToIndices", () => {
   it("reads set bits from a 32-byte big-endian word", () => {

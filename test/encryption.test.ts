@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { secp256k1 } from "@noble/curves/secp256k1";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { bytesToHex, hexToBytes } from "../src/core/encoding.js";
 import {
   normalizeSecp256k1PublicKeyHex,
@@ -35,7 +35,7 @@ describe("encryptForNodes", () => {
       index: 3,
       peerId: "p",
       address: "a",
-      signingKey: bytesToHex(secp256k1.getPublicKey(secp256k1.utils.randomPrivateKey(), true)),
+      signingKey: bytesToHex(secp256k1.getPublicKey(secp256k1.utils.randomSecretKey(), true)),
     };
     const bundle = encryptForNodes(
       { url: "https://api", responseParser: "$.price" },
@@ -49,7 +49,7 @@ describe("encryptForNodes", () => {
 
   it("rejects duplicate selected node indexes before resolving secrets", () => {
     const signingKey = bytesToHex(
-      secp256k1.getPublicKey(secp256k1.utils.randomPrivateKey(), true),
+      secp256k1.getPublicKey(secp256k1.utils.randomSecretKey(), true),
     );
     const duplicateIndexNodes: Node[] = [
       { index: 3, peerId: "p1", address: "a1", signingKey },
@@ -58,7 +58,7 @@ describe("encryptForNodes", () => {
         peerId: "p2",
         address: "a2",
         signingKey: bytesToHex(
-          secp256k1.getPublicKey(secp256k1.utils.randomPrivateKey(), true),
+          secp256k1.getPublicKey(secp256k1.utils.randomSecretKey(), true),
         ),
       },
     ];
@@ -74,7 +74,7 @@ describe("encryptForNodes", () => {
 
   it("rejects duplicate selected node public keys", () => {
     const signingKey = bytesToHex(
-      secp256k1.getPublicKey(secp256k1.utils.randomPrivateKey(), true),
+      secp256k1.getPublicKey(secp256k1.utils.randomSecretKey(), true),
     );
     const duplicateKeyNodes: Node[] = [
       { index: 3, peerId: "p1", address: "a1", signingKey },
@@ -93,7 +93,7 @@ describe("encryptForNodes", () => {
 
 describe("secp256k1 node key helpers", () => {
   it("normalizes compressed and uncompressed public keys to the same compressed hex", () => {
-    const privateKey = secp256k1.utils.randomPrivateKey();
+    const privateKey = secp256k1.utils.randomSecretKey();
     const compressed = bytesToHex(secp256k1.getPublicKey(privateKey, true));
     const uncompressed = bytesToHex(secp256k1.getPublicKey(privateKey, false));
 
@@ -102,7 +102,7 @@ describe("secp256k1 node key helpers", () => {
   });
 
   it("reconstructs and validates a public key from registry X/Y coordinates", () => {
-    const privateKey = secp256k1.utils.randomPrivateKey();
+    const privateKey = secp256k1.utils.randomSecretKey();
     const compressed = bytesToHex(secp256k1.getPublicKey(privateKey, true));
     const uncompressed = secp256k1.getPublicKey(privateKey, false);
 

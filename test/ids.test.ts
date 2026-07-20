@@ -1,4 +1,4 @@
-import { keccak_256 } from "@noble/hashes/sha3";
+import { keccak_256 } from "@noble/hashes/sha3.js";
 import { describe, expect, it } from "vitest";
 import { bytesToHex, concatBytes, utf8 } from "../src/core/encoding.js";
 import { deriveFeedId, deriveFeedIdString } from "../src/core/ids.js";

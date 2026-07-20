@@ -2,10 +2,10 @@
  * Account fetching, registry-version transition resolution, and remaining-accounts
  * construction.
  */
-import { type AccountMeta, PublicKey } from "@solana/web3.js";
 import { hexToBytes } from "../core/encoding.js";
 import { selectedIndices } from "../core/selection.js";
 import type { DataUpdateResult } from "../core/types.js";
+import { type SolanaAccountMeta, type SolanaAddress, toPublicKey } from "./kit.js";
 import { nodePda, VIRTUAL_INDEX } from "./pdas.js";
 
 /** The subset of on-chain `RegistryState` the client needs (Anchor camelCase). */
@@ -36,13 +36,13 @@ export function bitmapToIndices(signersBitmapHex: string): number[] {
 export function resolveRemainingAccounts(
   result: DataUpdateResult,
   registry: RegistryStateView,
-  programId: PublicKey,
-): AccountMeta[] {
+  programId: SolanaAddress,
+): SolanaAccountMeta[] {
   const bits = bitmapToIndices(result.signersBitmap);
 
   const mapIndex = registryIndexMapper(result.registryVersion, registry);
   return bits.map((bit) => ({
-    pubkey: nodePda(mapIndex(bit), programId),
+    pubkey: toPublicKey(nodePda(mapIndex(bit), programId)),
     isSigner: false,
     isWritable: false,
   }));

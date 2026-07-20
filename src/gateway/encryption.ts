@@ -1,10 +1,10 @@
 /**
  * API-config secret resolution + ECDH config encryption for selected nodes.
  */
-import { gcm } from "@noble/ciphers/aes";
-import { secp256k1 } from "@noble/curves/secp256k1";
-import { keccak_256 } from "@noble/hashes/sha3";
-import { randomBytes } from "@noble/hashes/utils";
+import { gcm } from "@noble/ciphers/aes.js";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { keccak_256 } from "@noble/hashes/sha3.js";
+import { randomBytes } from "@noble/hashes/utils.js";
 import { canonicalizeAPIConfig } from "../core/apiconfig.js";
 import { bytesToHex, concatBytes, hexToBytes, utf8 } from "../core/encoding.js";
 import { normalizeSecp256k1PublicKeyHex } from "../core/nodeKeys.js";
@@ -65,7 +65,7 @@ export function encryptForNodes(
   const nonceSym = randomBytes(NONCE_BYTES);
   const ciphertext = gcm(symKey, nonceSym).encrypt(plaintext);
 
-  const ephemeralPriv = secp256k1.utils.randomPrivateKey();
+  const ephemeralPriv = secp256k1.utils.randomSecretKey();
   const ephemeralPub = secp256k1.getPublicKey(ephemeralPriv, true); // compressed
 
   const envelopes: Record<string, string> = {};

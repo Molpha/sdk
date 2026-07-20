@@ -3,15 +3,15 @@
  * entry so browser bundles never pull in `fs`.
  */
 import { readFileSync } from "node:fs";
-import { Wallet } from "@coral-xyz/anchor";
-import { Keypair } from "@solana/web3.js";
+import { Wallet } from "@anchor-lang/core";
 import type { Signer } from "./core/types.js";
+import { keypairFromSecretKey, type SolanaKeypair } from "./solana/kit.js";
 import { signerFromKeypair, type MolphaWallet } from "./wallet.js";
 
 /** Load a Solana CLI keypair JSON file (array of 64 bytes) into a `Keypair`. */
-export function loadKeypair(path: string): Keypair {
+export function loadKeypair(path: string): SolanaKeypair {
   const raw = JSON.parse(readFileSync(path, "utf-8")) as number[];
-  return Keypair.fromSecretKey(Uint8Array.from(raw));
+  return keypairFromSecretKey(Uint8Array.from(raw));
 }
 
 /** Anchor `Wallet` backed by a keypair file (gateway auth derived from the same key). */

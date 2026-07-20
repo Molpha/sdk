@@ -3,7 +3,7 @@
  * verifier — this encodes what the *program* verifies (the 4-field `feedId`), not
  * the richer form described in the protocol spec doc.
  */
-import { keccak_256 } from "@noble/hashes/sha3";
+import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, concatBytes, ensureLength, utf8 } from "./encoding.js";
 
 const FEED_ID_PREFIX = utf8("MOLPHA_JOB_V1");

@@ -1,4 +1,4 @@
-import { ed25519 } from "@noble/curves/ed25519";
+import { ed25519 } from "@noble/curves/ed25519.js";
 import { describe, expect, it } from "vitest";
 import { authMessage } from "../src/gateway/auth.js";
 
@@ -10,7 +10,7 @@ describe("authMessage", () => {
 
     expect(msg).toHaveLength(32);
 
-    const keypair = ed25519.utils.randomPrivateKey();
+    const keypair = ed25519.utils.randomSecretKey();
     const publicKey = ed25519.getPublicKey(keypair);
     const signature = ed25519.sign(msg, keypair);
     expect(ed25519.verify(signature, msg, publicKey)).toBe(true);

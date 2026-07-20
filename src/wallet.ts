@@ -1,10 +1,10 @@
 /**
  * Unified wallet surface: Anchor txs + optional gateway authSig signing.
  */
-import type { Wallet } from "@coral-xyz/anchor";
-import { ed25519 } from "@noble/curves/ed25519";
-import type { Keypair } from "@solana/web3.js";
+import type { Wallet } from "@anchor-lang/core";
+import { ed25519 } from "@noble/curves/ed25519.js";
 import type { Signer } from "./core/types.js";
+import type { SolanaKeypair } from "./solana/kit.js";
 
 /** Anchor `Wallet` plus optional gateway auth override. */
 export type MolphaWallet = Wallet & {
@@ -15,14 +15,14 @@ export type MolphaWallet = Wallet & {
   signAuthMessage?: Signer;
 };
 
-const isKeypair = (value: unknown): value is Keypair =>
+const isKeypair = (value: unknown): value is SolanaKeypair =>
   typeof value === "object" &&
   value !== null &&
   "secretKey" in value &&
   value.secretKey instanceof Uint8Array;
 
 /** ed25519 gateway signer from a Solana keypair's 32-byte seed. */
-export function signerFromKeypair(keypair: Keypair): Signer {
+export function signerFromKeypair(keypair: SolanaKeypair): Signer {
   const seed = keypair.secretKey.slice(0, 32);
   return async (message: Uint8Array): Promise<Uint8Array> => ed25519.sign(message, seed);
 }

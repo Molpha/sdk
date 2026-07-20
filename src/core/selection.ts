@@ -4,7 +4,7 @@
  * Canonical bitmap representation = 32-byte big-endian word (bit `i` lives in
  * byte `31 - (i >> 3)`, mask `1 << (i & 7)`), matching the wire / on-chain form.
  */
-import { keccak_256 } from "@noble/hashes/sha3";
+import { keccak_256 } from "@noble/hashes/sha3.js";
 import { concatBytes, ensureLength, u32be, u64be, utf8 } from "./encoding.js";
 
 const SELECTION_SEED_DOMAIN = keccak_256(utf8("MOLPHA_SELECTION_V1"));

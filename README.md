@@ -46,7 +46,7 @@ pnpm add @molpha-oracle/sdk
 Solana support is optional and only needed for `MolphaSDK` / `MolphaSolanaClient`:
 
 ```bash
-pnpm add @solana/web3.js @coral-xyz/anchor @solana/spl-token bn.js
+pnpm add @solana/kit @anchor-lang/core bn.js
 ```
 
 | Import | Use |
@@ -59,12 +59,12 @@ The package is ESM with `"sideEffects": false`, so gateway-only or read-only app
 ## Quick start
 
 ```ts
-import { Connection } from "@solana/web3.js";
+import { web3 } from "@anchor-lang/core";
 import { MolphaSDK } from "@molpha-oracle/sdk";
 import { walletFromKeypairFile } from "@molpha-oracle/sdk/utils";
 
 const sdk = new MolphaSDK({
-  connection: new Connection("https://api.devnet.solana.com", "finalized"),
+  connection: new web3.Connection("https://api.devnet.solana.com", "finalized"),
   wallet: walletFromKeypairFile("~/.config/solana/id.json"),
 });
 
@@ -84,7 +84,7 @@ const { result, signature } = await sdk.requestAndSubmit(jobId, {
 
 | Option | Description |
 |---|---|
-| `connection` | Solana RPC `Connection`. |
+| `connection` | Anchor-compatible Solana RPC connection. |
 | `wallet` | [`MolphaWallet`](#wallet). Used for Solana transactions and gateway authentication when available. |
 
 ### Optional
@@ -107,7 +107,7 @@ const sdk = new MolphaSDK({
   connection,
   wallet,
   endpoints: [DEFAULT_GATEWAY_ENDPOINT, "https://backup.example.com"],
-  // programId: new PublicKey("..."),
+  // programId: "YourProgramAddress...",
   // idl: MOLPHA_IDL,
 });
 ```
@@ -162,7 +162,7 @@ You can also override gateway auth per call with `gateway.requestSignedData({ ..
 Use `MolphaSDK` for the end-to-end path, or use `MolphaSolanaClient` / `MolphaGateway` separately when you only need one side.
 
 ```ts
-import { Connection } from "@solana/web3.js";
+import { web3 } from "@anchor-lang/core";
 import {
   MolphaSDK,
   PlanType,
@@ -171,7 +171,7 @@ import {
 import { walletFromKeypairFile } from "@molpha-oracle/sdk/utils";
 
 const sdk = new MolphaSDK({
-  connection: new Connection("https://api.devnet.solana.com", "confirmed"),
+  connection: new web3.Connection("https://api.devnet.solana.com", "confirmed"),
   wallet: walletFromKeypairFile("~/.config/solana/id.json"),
 });
 ```

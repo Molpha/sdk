@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { secp256k1 } from "@noble/curves/secp256k1";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { bytesToHex } from "../src/core/encoding.js";
 import { GatewayError, MolphaGateway } from "../src/gateway/index.js";
 
@@ -20,7 +20,7 @@ const encryptedNodes = [0, 1, 2].map((index) => ({
   index,
   peerId: `p${index}`,
   address: `n${index}`,
-  signingKey: bytesToHex(secp256k1.getPublicKey(secp256k1.utils.randomPrivateKey(), true)),
+  signingKey: bytesToHex(secp256k1.getPublicKey(secp256k1.utils.randomSecretKey(), true)),
 }));
 
 function jsonResponse(body: unknown, status = 200): Response {

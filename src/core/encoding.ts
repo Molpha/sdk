@@ -1,6 +1,6 @@
 /**
  * Byte encoding primitives. Isomorphic — no `Buffer`, no `fs`. All byte work is
- * `Uint8Array` + `@noble/hashes/utils`. The canonical selection-bitmap and value
+ * `Uint8Array` + `@noble/hashes/utils.js`. The canonical selection-bitmap and value
  * representation is a 32-byte big-endian word; `bigint` is used only for internal
  * sampling/packing math and is never exposed on the wire.
  */
@@ -9,7 +9,7 @@ import {
   hexToBytes as nobleHexToBytes,
   utf8ToBytes as nobleUtf8ToBytes,
   concatBytes as nobleConcatBytes,
-} from "@noble/hashes/utils";
+} from "@noble/hashes/utils.js";
 
 export const utf8 = (s: string): Uint8Array => nobleUtf8ToBytes(s);
 export const concatBytes = (...arrays: Uint8Array[]): Uint8Array =>

@@ -1,4 +1,4 @@
-import { secp256k1 } from "@noble/curves/secp256k1";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { bytesToHex, concatBytes, ensureLength, hexToBytes } from "./encoding.js";
 
 const SECP256K1_COMPRESSED_PUBLIC_KEY_BYTES = 33;
@@ -33,7 +33,7 @@ export function normalizeSecp256k1PublicKeyHex(
   }
 
   try {
-    return bytesToHex(secp256k1.ProjectivePoint.fromHex(bytesToHex(bytes)).toRawBytes(true));
+    return bytesToHex(secp256k1.Point.fromBytes(bytes).toBytes(true));
   } catch {
     throw new Error(`${label}: invalid secp256k1 public key`);
   }
