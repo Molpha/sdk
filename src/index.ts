@@ -5,14 +5,15 @@
  * who only read or only run gateway rounds can use `sdk.gateway` / `sdk.solana`
  * directly (or import `MolphaGateway` / `MolphaSolanaClient` standalone).
  */
-import type { Commitment, Connection } from "@solana/web3.js";
-import { PublicKey } from "@solana/web3.js";
-import type { Idl } from "@coral-xyz/anchor";
+import { address, type Address } from "@solana/kit";
+import type { AnchorProvider, Idl } from "@anchor-lang/core";
 import { type RequestSignedDataOptions, MolphaGateway } from "./gateway/index.js";
 import { MolphaSolanaClient } from "./solana/client.js";
 import type { DataUpdateResult } from "./core/types.js";
 import { MOLPHA_IDL, MOLPHA_PROGRAM_ADDRESS } from "../idl/index.js";
 import { gatewaySignerFromWallet, type MolphaWallet } from "./wallet.js";
+import type { SolanaConnection } from "./solana/kit.js";
+type Commitment = NonNullable<ConstructorParameters<typeof AnchorProvider>[2]>["commitment"];
 
 // Public re-exports.
 export * from "./core/index.js";
@@ -26,11 +27,11 @@ export { gatewaySignerFromWallet, signerFromKeypair, type MolphaWallet } from ".
 export interface MolphaSDKOptions {
   /** Defaults to `DEFAULT_GATEWAY_ENDPOINT`. Pass multiple URLs for failover. */
   endpoints?: string | string[];
-  connection: Connection;
+  connection: SolanaConnection;
   /** On-chain txs + gateway auth (see `MolphaWallet`). */
   wallet: MolphaWallet;
   /** Defaults to the vendored IDL's program address. */
-  programId?: PublicKey;
+  programId?: Address | string;
   /** Defaults to `MOLPHA_IDL`. Override when pinning a different deployment. */
   idl?: Idl;
   commitment?: Commitment;
@@ -44,7 +45,7 @@ export class MolphaSDK {
     this.solana = MolphaSolanaClient.create({
       connection: opts.connection,
       wallet: opts.wallet,
-      programId: opts.programId ?? new PublicKey(MOLPHA_PROGRAM_ADDRESS),
+      programId: opts.programId ?? address(MOLPHA_PROGRAM_ADDRESS),
       idl: opts.idl ?? MOLPHA_IDL,
       ...(opts.commitment ? { commitment: opts.commitment } : {}),
     });

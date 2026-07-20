@@ -9,15 +9,9 @@ import {
   Program,
   type Idl,
   type Wallet,
-} from "@coral-xyz/anchor";
+} from "@anchor-lang/core";
 import BN from "bn.js";
-import { getAssociatedTokenAddressSync } from "@solana/spl-token";
-import {
-  type Commitment,
-  type Connection,
-  ComputeBudgetProgram,
-  PublicKey,
-} from "@solana/web3.js";
+import type { Address } from "@solana/kit";
 import { hexToBytes, toFixedBytes } from "../core/encoding.js";
 import {
   normalizeSecp256k1PublicKeyHex,
@@ -29,6 +23,15 @@ import {
   resolveRegistryIndexForVersion,
   resolveRemainingAccounts,
 } from "./accounts.js";
+import {
+  getAssociatedTokenAddressSync,
+  setComputeUnitLimit,
+  SYSTEM_PROGRAM_ADDRESS,
+  TOKEN_PROGRAM_ADDRESS,
+  toSolanaAddress,
+  type SolanaAddress,
+  type SolanaConnection,
+} from "./kit.js";
 import {
   feedPda,
   nodePda,
@@ -42,9 +45,8 @@ import { PlanType, planIdFromVariant, planVariant, type PlanId } from "./plans.j
 
 export { PlanType, type PlanId } from "./plans.js";
 
-const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
-const SYSTEM_PROGRAM_ID = new PublicKey("11111111111111111111111111111111");
 const DEFAULT_COMPUTE_UNIT_LIMIT = 700_000;
+type Commitment = NonNullable<ConstructorParameters<typeof AnchorProvider>[2]>["commitment"];
 
 export interface SubscribeResult {
   signature: string;
@@ -63,7 +65,7 @@ export interface PlanInfo {
 }
 
 export interface SubscriptionInfo {
-  owner: PublicKey;
+  owner: Address;
   planType: PlanType;
   /** USDC base units prepaid on the subscription vault. */
   prepaidUsdc: bigint;
@@ -101,9 +103,9 @@ interface NodeAccount {
 }
 
 interface CreateClientOpts {
-  connection: Connection;
+  connection: SolanaConnection;
   wallet: Wallet;
-  programId?: PublicKey;
+  programId?: SolanaAddress;
   idl?: Idl;
   commitment?: Commitment;
 }
@@ -112,23 +114,23 @@ export class MolphaSolanaClient {
   private constructor(
     private readonly program: Program,
     private readonly provider: AnchorProvider,
-    readonly programId: PublicKey,
+    readonly programId: Address,
   ) {}
 
   static create(opts: CreateClientOpts): MolphaSolanaClient {
-    const programId = opts.programId ?? new PublicKey(MOLPHA_PROGRAM_ADDRESS);
+    const programId = toSolanaAddress(opts.programId ?? MOLPHA_PROGRAM_ADDRESS);
     const provider = new AnchorProvider(opts.connection, opts.wallet, {
       commitment: opts.commitment ?? "confirmed",
     });
-    // Anchor 0.30 reads the program id from `idl.address`; override it so the
+    // Anchor reads the program id from `idl.address`; override it so the
     // caller-supplied programId always wins without mutating the vendored copy.
-    const idl: Idl = { ...(opts.idl ?? MOLPHA_IDL), address: programId.toBase58() };
+    const idl: Idl = { ...(opts.idl ?? MOLPHA_IDL), address: programId };
     const program = new Program(idl, provider);
     return new MolphaSolanaClient(program, provider, programId);
   }
 
-  private get wallet(): PublicKey {
-    return this.provider.wallet.publicKey;
+  private get wallet(): Address {
+    return toSolanaAddress(this.provider.wallet.publicKey);
   }
 
   /** Anchor's method/account namespaces are untyped without an IDL type param. */
@@ -173,13 +175,13 @@ export class MolphaSolanaClient {
   }
 
   /** Read an owner's subscription, or `null` if they have not subscribed. */
-  async readSubscription(owner: PublicKey = this.wallet): Promise<SubscriptionInfo | null> {
+  async readSubscription(owner: SolanaAddress = this.wallet): Promise<SubscriptionInfo | null> {
     const account = await this.accounts.subscription.fetchNullable(
       subscriptionPda(owner, this.programId),
     );
     if (!account) return null;
     return {
-      owner: account.owner,
+      owner: toSolanaAddress(account.owner),
       planType: planIdFromVariant(account.planType) as unknown as PlanType,
       prepaidUsdc: BigInt(account.prepaidUsdc.toString()),
       price: BigInt(account.price.toString()),
@@ -206,7 +208,7 @@ export class MolphaSolanaClient {
    */
   async subscribe(
     plan: PlanType,
-    opts: { maxPriceUsdc: bigint | number | BN; ownerUsdc?: PublicKey },
+    opts: { maxPriceUsdc: bigint | number | BN; ownerUsdc?: SolanaAddress },
   ): Promise<SubscribeResult> {
     const planId = plan as PlanId;
     const owner = this.wallet;
@@ -224,8 +226,8 @@ export class MolphaSolanaClient {
         usdcMint,
         ownerUsdc,
         treasury,
-        systemProgram: SYSTEM_PROGRAM_ID,
-        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SYSTEM_PROGRAM_ADDRESS,
+        tokenProgram: TOKEN_PROGRAM_ADDRESS,
       })
       .rpc();
     return { signature, pricePaid: price };
@@ -237,7 +239,7 @@ export class MolphaSolanaClient {
    * payment confirmation via `maxPriceUsdc`.
    */
   async extendSubscription(
-    opts: { maxPriceUsdc: bigint | number | BN; ownerUsdc?: PublicKey },
+    opts: { maxPriceUsdc: bigint | number | BN; ownerUsdc?: SolanaAddress },
   ): Promise<SubscribeResult> {
     const owner = this.wallet;
     const subscription = subscriptionPda(owner, this.programId);
@@ -257,7 +259,7 @@ export class MolphaSolanaClient {
         usdcMint,
         ownerUsdc,
         treasury,
-        tokenProgram: TOKEN_PROGRAM_ID,
+        tokenProgram: TOKEN_PROGRAM_ADDRESS,
       })
       .rpc();
     return { signature, pricePaid: price };
@@ -291,9 +293,7 @@ export class MolphaSolanaClient {
     const registry = await this.fetchRegistry();
     const feedId = hexToBytes(result.feedId);
     const remaining = resolveRemainingAccounts(result, registry, this.programId);
-    const cuIx = ComputeBudgetProgram.setComputeUnitLimit({
-      units: opts?.computeUnitLimit ?? DEFAULT_COMPUTE_UNIT_LIMIT,
-    });
+    const cuIx = setComputeUnitLimit(opts?.computeUnitLimit ?? DEFAULT_COMPUTE_UNIT_LIMIT);
 
     const signature = await this.methods
       .submitDataUpdate(this.buildSubmitArgs(result))
@@ -301,7 +301,7 @@ export class MolphaSolanaClient {
         submitter: this.wallet,
         registryState: registryStatePda(this.programId),
         feed: feedPda(feedId, this.programId),
-        systemProgram: SYSTEM_PROGRAM_ID,
+        systemProgram: SYSTEM_PROGRAM_ADDRESS,
       })
       .remainingAccounts(remaining)
       .preInstructions([cuIx])
@@ -408,11 +408,14 @@ export class MolphaSolanaClient {
     }
   }
 
-  private async fetchProtocolTokens(): Promise<{ usdcMint: PublicKey; treasury: PublicKey }> {
+  private async fetchProtocolTokens(): Promise<{ usdcMint: Address; treasury: Address }> {
     const config = await this.accounts.protocolConfig.fetch(
       protocolConfigPda(this.programId),
     );
-    return { usdcMint: config.usdcMint, treasury: config.treasury };
+    return {
+      usdcMint: toSolanaAddress(config.usdcMint),
+      treasury: toSolanaAddress(config.treasury),
+    };
   }
 }
 

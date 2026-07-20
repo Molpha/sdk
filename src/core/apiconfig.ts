@@ -2,7 +2,7 @@
  * API config canonicalization + hashing. Must stay byte-identical with gateway/node
  * verification: `apiConfigHash = keccak256(JSON.stringify(apiConfig))`.
  */
-import { keccak_256 } from "@noble/hashes/sha3";
+import { keccak_256 } from "@noble/hashes/sha3.js";
 import { utf8 } from "./encoding.js";
 import type { APIConfig } from "./types.js";
 
