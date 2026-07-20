@@ -130,7 +130,7 @@ interface GatewayEnvelope<T> {
 const ZERO_AUTH_SIG = new Uint8Array(64);
 
 /** Default gateway base URL when `endpoints` is omitted. */
-export const DEFAULT_GATEWAY_ENDPOINT = "https://brebeneskul.gateway.molpha.io/";
+export const DEFAULT_GATEWAY_ENDPOINT = "https://dev-gateway.molpha.io/";
 
 /** Thrown for terminal gateway errors (400/401) — never retried. */
 export class GatewayError extends Error {
