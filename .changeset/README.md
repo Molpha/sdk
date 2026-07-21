@@ -1,7 +1,7 @@
 # Changesets
 
 This folder is managed by [changesets](https://github.com/changesets/changesets). It holds the
-intent-to-release files that drive versioning and publishing for `@molpha-oracle/sdk`.
+intent-to-release files that drive versioning and publishing for `@molpha/sdk`.
 
 ## Adding a changeset
 

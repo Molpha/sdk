@@ -1,5 +1,5 @@
 /**
- * `@molpha-oracle/sdk/utils` — Node.js-only helpers (fs + keypair files). Kept out of the main
+ * `@molpha/sdk/utils` — Node.js-only helpers (fs + keypair files). Kept out of the main
  * entry so browser bundles never pull in `fs`.
  */
 import { readFileSync } from "node:fs";
