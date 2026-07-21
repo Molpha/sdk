@@ -2,8 +2,6 @@
 
 Browser-first TypeScript SDK for **Molpha data consumers and feed owners**.
 
-**Detailed reference:** [docs/SDK.md](./docs/SDK.md) (API surface, types, EVM/Starknet helpers, end-to-end flow).
-
 Use it to:
 
 - subscribe to a Molpha plan on Solana;
