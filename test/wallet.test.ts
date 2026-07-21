@@ -1,12 +1,12 @@
-import { Wallet } from "@coral-xyz/anchor";
-import { Keypair } from "@solana/web3.js";
+import { Wallet } from "@anchor-lang/core";
 import { describe, expect, it } from "vitest";
 import { authMessage } from "../src/gateway/auth.js";
+import { generateKeypair } from "../src/solana/kit.js";
 import { gatewaySignerFromWallet, signerFromKeypair, type MolphaWallet } from "../src/wallet.js";
 
 describe("gatewaySignerFromWallet", () => {
   it("derives auth signing from Anchor Wallet.payer", async () => {
-    const keypair = Keypair.generate();
+    const keypair = generateKeypair();
     const wallet = new Wallet(keypair);
     const signer = gatewaySignerFromWallet(wallet);
     expect(signer).toBeDefined();
@@ -17,7 +17,7 @@ describe("gatewaySignerFromWallet", () => {
   });
 
   it("prefers signAuthMessage when set", async () => {
-    const keypair = Keypair.generate();
+    const keypair = generateKeypair();
     const wallet = new Wallet(keypair);
     const custom = async () => new Uint8Array(64);
     const molpha = Object.assign(wallet, { signAuthMessage: custom }) as MolphaWallet;

@@ -6,5 +6,6 @@
 export * from "./apiconfig.js";
 export * from "./encoding.js";
 export * from "./ids.js";
+export * from "./nodeKeys.js";
 export * from "./selection.js";
 export * from "./types.js";

@@ -1,13 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DataUpdateResult } from "../src/core/types.js";
-import {
-  MOLPHA_VERIFIER_ADDRESSES,
-  MOLPHA_VERIFIER_ARBITRUM_SEPOLIA,
-  MOLPHA_VERIFIER_AVALANCHE_FUJI,
-  MOLPHA_VERIFIER_BSC_TESTNET,
-  MOLPHA_VERIFIER_EVM_SEPOLIA,
-  getMolphaVerifierAddress,
-} from "../src/evm/constants.js";
+import { MOLPHA_VERIFIER_ADDRESS } from "../src/evm/constants.js";
 import {
   buildEvmVerifierArgs,
   signersBitmapToDecimal,
@@ -16,7 +9,7 @@ import {
 } from "../src/evm/helpers.js";
 
 const SAMPLE_RESULT: DataUpdateResult = {
-  jobId: "aa".repeat(32),
+  feedId: "aa".repeat(32),
   value: "100",
   valuePacked: "bb".repeat(32),
   timestamp: 1_700_000_000,
@@ -28,25 +21,11 @@ const SAMPLE_RESULT: DataUpdateResult = {
   fresh: true,
 };
 
-describe("MOLPHA verifier addresses", () => {
-  it("exports the expected deployed addresses", () => {
-    expect(MOLPHA_VERIFIER_EVM_SEPOLIA).toBe(
-      "0xb8e31ec095A22B1374cF87C19F94889476AFeB74",
+describe("MOLPHA verifier address", () => {
+  it("exports the CREATE2 address used on all EVM chains", () => {
+    expect(MOLPHA_VERIFIER_ADDRESS).toBe(
+      "0xE1fd792b7E54e0C8F0Cd1c8055E446ff36d233eB",
     );
-    expect(MOLPHA_VERIFIER_ARBITRUM_SEPOLIA).toBe(
-      "0x61f8e4C4c7272332D5fc45586b6641A586127D07",
-    );
-    expect(MOLPHA_VERIFIER_AVALANCHE_FUJI).toBe(
-      "0x09F3E1eBCB296876882a3A4C2CE4D18Ea27582fC",
-    );
-    expect(MOLPHA_VERIFIER_BSC_TESTNET).toBe(
-      "0x04Ba82685B6c805C0f3b5C9e6CFc9c7439b56F26",
-    );
-  });
-
-  it("maps network ids to addresses", () => {
-    expect(MOLPHA_VERIFIER_ADDRESSES["evm-sepolia"]).toBe(MOLPHA_VERIFIER_EVM_SEPOLIA);
-    expect(getMolphaVerifierAddress("bsc-testnet")).toBe(MOLPHA_VERIFIER_BSC_TESTNET);
   });
 });
 

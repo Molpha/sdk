@@ -12,7 +12,7 @@ import {
 } from "../src/starknet/helpers.js";
 
 const SAMPLE_RESULT: DataUpdateResult = {
-  jobId: "aa".repeat(32),
+  feedId: "aa".repeat(32),
   value: "100",
   valuePacked: "bb".repeat(32),
   timestamp: 1_700_000_000,
@@ -27,7 +27,7 @@ const SAMPLE_RESULT: DataUpdateResult = {
 describe("Molpha Starknet verifier addresses", () => {
   it("exports the expected deployed addresses", () => {
     expect(MOLPHA_VERIFIER_STARKNET_SEPOLIA).toBe(
-      "0x0489ddba93d59dbd6ea6aed84bd0697a45af7d23b278262ad78faa6de4ad6af0",
+      "0x0378df4dbecf8f0c7daa801282932f7011c7a5e5773bab9eaf68f5fa5e7530ef",
     );
   });
 
@@ -51,7 +51,7 @@ describe("Starknet verifier argument helpers", () => {
     const { dataUpdate, signature } = buildStarknetVerifierArgs(SAMPLE_RESULT);
 
     expect(dataUpdate).toEqual({
-      job_id: BigInt(`0x${"aa".repeat(32)}`),
+      feed_id: BigInt(`0x${"aa".repeat(32)}`),
       registry_version: 2,
       signatures_required: 3,
       value: BigInt(`0x${"bb".repeat(32)}`),

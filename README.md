@@ -46,7 +46,7 @@ pnpm add @molpha-oracle/sdk
 Solana support is optional and only needed for `MolphaSDK` / `MolphaSolanaClient`:
 
 ```bash
-pnpm add @solana/web3.js @coral-xyz/anchor @solana/spl-token bn.js
+pnpm add @solana/kit @anchor-lang/core bn.js
 ```
 
 | Import | Use |
@@ -59,12 +59,12 @@ The package is ESM with `"sideEffects": false`, so gateway-only or read-only app
 ## Quick start
 
 ```ts
-import { Connection } from "@solana/web3.js";
+import { web3 } from "@anchor-lang/core";
 import { MolphaSDK } from "@molpha-oracle/sdk";
 import { walletFromKeypairFile } from "@molpha-oracle/sdk/utils";
 
 const sdk = new MolphaSDK({
-  connection: new Connection("https://api.devnet.solana.com", "finalized"),
+  connection: new web3.Connection("https://api.devnet.solana.com", "finalized"),
   wallet: walletFromKeypairFile("~/.config/solana/id.json"),
 });
 
@@ -84,7 +84,7 @@ const { result, signature } = await sdk.requestAndSubmit(jobId, {
 
 | Option | Description |
 |---|---|
-| `connection` | Solana RPC `Connection`. |
+| `connection` | Anchor-compatible Solana RPC connection. |
 | `wallet` | [`MolphaWallet`](#wallet). Used for Solana transactions and gateway authentication when available. |
 
 ### Optional
@@ -107,7 +107,7 @@ const sdk = new MolphaSDK({
   connection,
   wallet,
   endpoints: [DEFAULT_GATEWAY_ENDPOINT, "https://backup.example.com"],
-  // programId: new PublicKey("..."),
+  // programId: "YourProgramAddress...",
   // idl: MOLPHA_IDL,
 });
 ```
@@ -162,7 +162,7 @@ You can also override gateway auth per call with `gateway.requestSignedData({ ..
 Use `MolphaSDK` for the end-to-end path, or use `MolphaSolanaClient` / `MolphaGateway` separately when you only need one side.
 
 ```ts
-import { Connection } from "@solana/web3.js";
+import { web3 } from "@anchor-lang/core";
 import {
   MolphaSDK,
   PlanType,
@@ -171,7 +171,7 @@ import {
 import { walletFromKeypairFile } from "@molpha-oracle/sdk/utils";
 
 const sdk = new MolphaSDK({
-  connection: new Connection("https://api.devnet.solana.com", "confirmed"),
+  connection: new web3.Connection("https://api.devnet.solana.com", "confirmed"),
   wallet: walletFromKeypairFile("~/.config/solana/id.json"),
 });
 ```
@@ -261,17 +261,17 @@ const { signature } = await sdk.solana.submitDataUpdate(result);
 
 ### Fast requests with a cached context
 
-By default every `requestSignedData` call fetches three slow-changing inputs up
-front (in parallel): the on-chain registry version, the node set, and the job
-config. When you run many rounds for the same job, fetch these once and reuse
-them so each round is a single gateway POST.
+By default every `requestSignedData` call fetches slow-changing inputs up
+front (in parallel): the on-chain registry version and redundancy buffer (one
+account read), and the node set. When you run many rounds for the same feed,
+fetch these once and reuse them so each round is a single gateway POST.
 
 ```ts
-// Fetch registryVersion + nodes + jobConfig once.
-const context = await sdk.gateway.prepareContext(jobId);
+// Fetch registryVersion + redundancyBuffer + nodes once.
+const context = await sdk.gateway.prepareContext(feedId);
 
 // Reuse it across rounds — no prelude fetches.
-const result = await sdk.gateway.requestSignedData({ jobId, apiConfig, context });
+const result = await sdk.gateway.requestSignedData({ feedId, apiConfig, context });
 ```
 
 `context` is a `Partial<RoundContext>`, so you can cache only what you have
@@ -279,16 +279,16 @@ and let `requestSignedData` fetch the rest:
 
 ```ts
 const result = await sdk.gateway.requestSignedData({
-  jobId,
+  feedId,
   apiConfig,
-  context: { nodes, jobConfig }, // registryVersion still fetched fresh
+  context: { nodes }, // registryVersion + redundancyBuffer still fetched fresh
 });
 ```
 
-Caching is opt-in because these inputs can drift. A stale `registryVersion` (or
-node set) yields a result the chain will reject — refresh the context when the
-on-chain registry version changes. The same `context` field is accepted by
-`requestAndSubmit`.
+Caching is opt-in because these inputs can drift. A stale `registryVersion`,
+`redundancyBuffer`, or node set yields a result the chain will reject — refresh
+the context when the on-chain registry changes. The same `context` field is
+accepted by `requestAndSubmit`.
 
 ## Private APIs and encrypted secrets
 
@@ -319,28 +319,16 @@ After a gateway round, the same signed result can be verified on EVM chains.
 
 The SDK ships deployed testnet verifier addresses and framework-agnostic tuple builders. It does not depend on ethers or viem at runtime.
 
-### Deployed verifier addresses
+### Deployed verifier address
+
+The verifier is deployed with CREATE2 so the contract address is the same on every
+supported EVM chain.
 
 ```ts
-import {
-  MOLPHA_VERIFIER_ADDRESSES,
-  MOLPHA_VERIFIER_EVM_SEPOLIA,
-  getMolphaVerifierAddress,
-} from "@molpha-oracle/sdk";
+import { MOLPHA_VERIFIER_ADDRESS } from "@molpha-oracle/sdk";
 
-const address = getMolphaVerifierAddress("evm-sepolia");
-
-// or:
-const arbitrum = MOLPHA_VERIFIER_ADDRESSES["arbitrum-sepolia"];
-const ethereum = MOLPHA_VERIFIER_EVM_SEPOLIA;
+const address = MOLPHA_VERIFIER_ADDRESS;
 ```
-
-| Network | Constant |
-|---|---|
-| Ethereum Sepolia | `MOLPHA_VERIFIER_EVM_SEPOLIA` |
-| Arbitrum Sepolia | `MOLPHA_VERIFIER_ARBITRUM_SEPOLIA` |
-| Avalanche Fuji | `MOLPHA_VERIFIER_AVALANCHE_FUJI` |
-| BSC testnet | `MOLPHA_VERIFIER_BSC_TESTNET` |
 
 ### Build verifier arguments
 
@@ -374,11 +362,11 @@ The generated tuples match the Molpha EVM verifier ABI:
 import { Contract } from "ethers";
 import {
   buildEvmVerifierArgs,
-  getMolphaVerifierAddress,
+  MOLPHA_VERIFIER_ADDRESS,
 } from "@molpha-oracle/sdk";
 
 const verifier = new Contract(
-  getMolphaVerifierAddress("evm-sepolia"),
+  MOLPHA_VERIFIER_ADDRESS,
   abi,
   signer,
 );
@@ -394,7 +382,7 @@ await verifier.verify(dataUpdate, signature);
 import { createPublicClient, http } from "viem";
 import {
   buildEvmVerifierArgs,
-  MOLPHA_VERIFIER_EVM_SEPOLIA,
+  MOLPHA_VERIFIER_ADDRESS,
 } from "@molpha-oracle/sdk";
 
 const client = createPublicClient({
@@ -405,7 +393,7 @@ const client = createPublicClient({
 const { dataUpdate, signature } = buildEvmVerifierArgs(result);
 
 await client.readContract({
-  address: MOLPHA_VERIFIER_EVM_SEPOLIA,
+  address: MOLPHA_VERIFIER_ADDRESS,
   abi,
   functionName: "verify",
   args: [dataUpdate, signature],
@@ -536,11 +524,11 @@ const solana = MolphaSolanaClient.create({
 
 const gateway = new MolphaGateway(
   endpoints,
-  () => solana.getRegistryVersion(),
+  () => solana.getRegistrySelectionConfig(),
 );
 ```
 
-The facade wires the registry version resolver automatically.
+The facade wires the registry selection config resolver automatically.
 
 ## Status
 

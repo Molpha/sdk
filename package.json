@@ -46,30 +46,25 @@
     "test:watch": "vitest",
     "clean": "rm -rf dist",
     "changeset": "changeset",
+    "changeset:add-empty": "changeset add --empty",
     "version-packages": "changeset version",
+    "e2e-demo": "tsx scripts/molpha-consumer-e2e-demo.ts",
     "release": "pnpm build && changeset publish",
-    "release:dev": "changeset version --snapshot dev && changeset publish --no-git-tag --tag dev"
+    "release:dev": "changeset version --snapshot dev && pnpm build && changeset publish --no-git-tag --tag dev"
   },
   "dependencies": {
-    "@noble/ciphers": "^1.3.0",
-    "@noble/curves": "^1.9.7",
-    "@noble/hashes": "^1.8.0",
+    "@noble/ciphers": "^2.2.0",
+    "@noble/curves": "^2.2.0",
+    "@noble/hashes": "^2.2.0",
+    "@solana/kit": "^7.0.0",
     "canonicalize": "^3.0.0"
   },
   "peerDependencies": {
-    "@coral-xyz/anchor": "^0.30.1",
-    "@solana/spl-token": "^0.4.14",
-    "@solana/web3.js": "^1.98.4",
+    "@anchor-lang/core": "^1.1.2",
     "bn.js": "^5.1.2"
   },
   "peerDependenciesMeta": {
-    "@coral-xyz/anchor": {
-      "optional": true
-    },
-    "@solana/spl-token": {
-      "optional": true
-    },
-    "@solana/web3.js": {
+    "@anchor-lang/core": {
       "optional": true
     },
     "bn.js": {
@@ -77,27 +72,26 @@
     }
   },
   "devDependencies": {
+    "@anchor-lang/core": "^1.1.2",
     "@changesets/cli": "^2.31.0",
-    "@coral-xyz/anchor": "^0.32.1",
-    "@solana/spl-token": "^0.4.14",
-    "@solana/web3.js": "^1.98.4",
     "@types/bn.js": "^5.2.0",
     "bn.js": "^5.2.3",
     "tsup": "^8.5.1",
+    "tsx": "^4.22.4",
     "typescript": "^5.7.3",
     "viem": "^2.52.2",
     "vitest": "^3.0.5"
   },
   "pnpm": {
     "overrides": {
-      "uuid": ">=11.1.1",
+      "rpc-websockets>uuid": "11.1.1",
       "ws": ">=8.21.0",
       "js-yaml": ">=4.2.0",
       "esbuild": ">=0.28.1"
     }
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20.19.0"
   },
   "packageManager": "pnpm@10.15.1+sha512.34e538c329b5553014ca8e8f4535997f96180a1d0f614339357449935350d924e22f8614682191264ec33d1462ac21561aff97f6bb18065351c162c7e8f6de67"
 }

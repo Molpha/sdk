@@ -12,14 +12,27 @@ export interface Node {
   signingKey: string;
 }
 
-/** Per-job quorum configuration as returned by the gateway. */
-export interface JobConfig {
-  signaturesRequired: number;
-  redundancyBuffer: number;
-  decimals: number;
+/** Selected node-key material that must be authenticated before private API encryption. */
+export interface NodeKeyVerifierArgs {
+  /** 32-byte feed id, hex. */
+  feedId: string;
+  /** On-chain registry version the gateway round is bound to. */
+  registryVersion: number;
+  /** Canonical timestamp used to derive the selected indexes. */
+  timestamp: number;
+  /** Selected node indexes derived from the round bitmap, ascending. */
+  selectedIndexes: readonly number[];
+  /** Gateway-provided selected nodes whose keys must be authenticated. */
+  selectedNodes: readonly Node[];
 }
 
-/** The off-chain API definition a job resolves. */
+/**
+ * Authenticates selected gateway node encryption keys. Throwing fails the
+ * private API request before secrets are encrypted or posted.
+ */
+export type NodeKeyVerifier = (args: NodeKeyVerifierArgs) => void | Promise<void>;
+
+/** The off-chain API definition a feed resolves. */
 export interface APIConfig {
   url: string;
   method?: "GET" | "POST" | "PUT";
@@ -43,6 +56,16 @@ export interface EncKeyBundle {
 export type Signer = (message: Uint8Array) => Promise<Uint8Array>;
 
 /**
+ * On-chain registry fields a gateway selection round is bound to. Fetched from
+ * `RegistryState` (`current_version`, `redundancy_buffer`).
+ */
+export interface RegistrySelectionConfig {
+  registryVersion: number;
+  /** Selection padding: `min(signaturesRequired + redundancyBuffer, nodeCount)`. */
+  redundancyBuffer: number;
+}
+
+/**
  * Aggregate Schnorr signature in the commitment-address form the shipped program
  * verifies (`MOLPHA_MESSAGE_V1`). The legacy `(rx, ryParity)` fields are gone.
  */
@@ -57,7 +80,7 @@ export interface SchnorrSignature {
 
 /** A completed gateway round, ready to submit on-chain. */
 export interface DataUpdateResult {
-  jobId: string;
+  feedId: string;
   /** Human-readable value. */
   value: string;
   /** 32-byte packed value, hex. */

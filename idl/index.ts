@@ -1,4 +1,4 @@
-import type { Idl } from "@coral-xyz/anchor";
+import type { Idl } from "@anchor-lang/core";
 import idlJson from "./molpha.json" with { type: "json" };
 
 /**
