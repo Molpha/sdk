@@ -592,7 +592,7 @@ The facade wires the registry selection config resolver, gateway signer, subscri
 
 ## Status
 
-`0.1.0` — consumer SDK for Molpha feeds.
+`0.0.0` (unreleased) — first stable release `@molpha/sdk@0.1.0` is pending via changesets.
 
 Current scope:
 
