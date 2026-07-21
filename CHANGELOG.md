@@ -1,5 +1,40 @@
 # @molpha-oracle/sdk
 
+## 0.5.0
+
+### Minor Changes
+
+- d586e89: rename job IDs to feed IDs and unify the EVM verifier address
+
+  Feed terminology replaces job IDs across the public API, and feed derivation now
+  includes the quorum threshold:
+
+  - `deriveJobId` / `deriveJobIdString` → `deriveFeedId` / `deriveFeedIdString`
+    (now requires `signaturesRequired`)
+  - `jobId` options and params → `feedId` (`requestSignedData`, `requestAndSubmit`,
+    Solana client helpers, gateway auth message fields)
+  - Solana account/PDA helpers updated for the feed-id layout
+
+  EVM verifier constants collapse to a single CREATE2 address shared by every
+  supported chain:
+
+  - `MOLPHA_VERIFIER_*` per-network constants, `MOLPHA_VERIFIER_ADDRESSES`, and
+    `getMolphaVerifierAddress` → `MOLPHA_VERIFIER_ADDRESS`
+
+### Patch Changes
+
+- f1e3cef: update dependencies
+- 60f56af: Update idl
+- 330f0f0: Authenticate private API node encryption keys before encrypting secrets.
+
+  `MolphaGateway.requestSignedData({ encrypt })` now fails closed unless selected
+  gateway node keys are verified or callers explicitly opt into unsafe development
+  behavior with `allowUnverifiedNodeKeysForPrivateApi: true`. `MolphaSDK` wires the
+  default verifier to Solana registry index accounts, comparing on-chain
+  secp256k1 key coordinates with selected gateway node keys before encryption.
+
+- 5aa17fe: update gateway url
+
 ## 0.4.2
 
 ### Patch Changes
